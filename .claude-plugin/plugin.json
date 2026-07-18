@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "grace-in-the-gap",
+  "description": "Turns Claude Code wait states into brief, private, opt-in Scripture moments using Gloo and YouVersion adapters.",
+  "version": "0.1.0",
+  "defaultEnabled": false,
+  "author": {
+    "name": "Grace in the Gap"
+  },
+  "license": "MIT",
+  "keywords": [
+    "scripture",
+    "wait-state",
+    "wellbeing",
+    "youversion",
+    "gloo"
+  ],
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable wait-state moments",
+      "description": "Show Grace moments during eligible Claude Code waits.",
+      "default": true
+    },
+    "locale": {
+      "type": "string",
+      "title": "Locale",
+      "description": "BCP 47 locale for moments.",
+      "default": "en-US"
+    },
+    "context_mode": {
+      "type": "string",
+      "title": "Context mode",
+      "description": "private ignores prompt content; local-labels derives only a coarse label on device.",
+      "default": "local-labels"
+    },
+    "minimum_wait_seconds": {
+      "type": "number",
+      "title": "Minimum estimated wait",
+      "description": "Do not show a moment below this local wait estimate.",
+      "default": 8,
+      "min": 0,
+      "max": 120
+    },
+    "cooldown_minutes": {
+      "type": "number",
+      "title": "Cooldown",
+      "description": "Minimum time between automatic moments.",
+      "default": 10,
+      "min": 0,
+      "max": 1440
+    },
+    "max_cards_per_day": {
+      "type": "number",
+      "title": "Daily cap",
+      "description": "Maximum automatic moments per day; zero disables automatic cards.",
+      "default": 6,
+      "min": 0,
+      "max": 100
+    },
+    "telemetry_enabled": {
+      "type": "boolean",
+      "title": "Local telemetry",
+      "description": "Write allow-listed product events locally. Raw prompts are never included.",
+      "default": false
+    },
+    "gloo_client_id": {
+      "type": "string",
+      "title": "Gloo client ID",
+      "description": "Required. From Gloo AI Studio > API Credentials. Free for challenge participants.",
+      "sensitive": true
+    },
+    "gloo_client_secret": {
+      "type": "string",
+      "title": "Gloo client secret",
+      "description": "Required. Stored in Claude Code secure storage.",
+      "sensitive": true
+    },
+    "gloo_endpoint_mode": {
+      "type": "string",
+      "title": "Gloo endpoint mode",
+      "description": "Use responses for a new account or grounded after publishing the content library.",
+      "default": "responses"
+    },
+    "gloo_rag_publisher": {
+      "type": "string",
+      "title": "Gloo publisher",
+      "description": "Publisher name required only for grounded endpoint mode."
+    },
+    "yvp_app_key": {
+      "type": "string",
+      "title": "YouVersion app key",
+      "description": "Required. From the YouVersion Platform portal. Stored in Claude Code secure storage.",
+      "sensitive": true
+    }
+  }
+}

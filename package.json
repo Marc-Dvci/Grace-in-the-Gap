@@ -1,0 +1,37 @@
+{
+  "name": "grace-in-the-gap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live Claude Code wait-state Scripture plugin (Gloo + YouVersion) for the Scripture in New Frontiers challenge",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "bin": {
+    "grace-in-the-gap": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev:api": "tsx src/api/main.ts",
+    "moment": "tsx src/cli.ts moment",
+    "eval": "tsx src/evaluation/run.ts",
+    "smoke:built": "tsx scripts/smoke-built.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check": "npm run typecheck && npm run test && npm run eval && npm run build && npm run smoke:built"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

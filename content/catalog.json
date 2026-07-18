@@ -1,0 +1,196 @@
+{
+  "release": "2026.07-demo.1",
+  "review_notice": "Conservative demo copy. A qualified theology/editorial reviewer must approve this release before public launch.",
+  "offline_passages_notice": "Public-domain World English Bible verses, used only as an offline fallback when the live YouVersion API is unreachable.",
+  "profiles": [
+    {
+      "id": "quiet-trust",
+      "task_types": ["generation", "analysis", "unknown"],
+      "tone": "calm",
+      "snippet_id": "pause-and-release",
+      "passage_hint": "PSA.46.10",
+      "weight": 1
+    },
+    {
+      "id": "purposeful-work",
+      "task_types": ["implementation", "refactor"],
+      "tone": "steady",
+      "snippet_id": "work-with-purpose",
+      "passage_hint": "COL.3.23",
+      "weight": 1
+    },
+    {
+      "id": "wisdom-in-debugging",
+      "task_types": ["debugging"],
+      "tone": "reflective",
+      "snippet_id": "make-room-for-wisdom",
+      "passage_hint": "JAS.1.5",
+      "weight": 1
+    },
+    {
+      "id": "patient-in-testing",
+      "task_types": ["testing"],
+      "tone": "encouraging",
+      "snippet_id": "hope-while-it-runs",
+      "passage_hint": "ROM.12.12",
+      "weight": 1
+    },
+    {
+      "id": "committed-plans",
+      "task_types": ["planning"],
+      "tone": "steady",
+      "snippet_id": "hold-the-plan-lightly",
+      "passage_hint": "PRO.16.3",
+      "weight": 1
+    },
+    {
+      "id": "thoughtful-review",
+      "task_types": ["review"],
+      "tone": "reflective",
+      "snippet_id": "notice-what-is-good",
+      "passage_hint": "PHP.4.8",
+      "weight": 1
+    },
+    {
+      "id": "rest-for-late-work",
+      "task_types": ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      "tone": "calm",
+      "snippet_id": "you-can-rest",
+      "passage_hint": "MAT.11.28",
+      "time_windows": ["late-evening"],
+      "weight": 1.25
+    },
+    {
+      "id": "care-in-uncertainty",
+      "task_types": ["debugging", "analysis", "unknown"],
+      "tone": "encouraging",
+      "snippet_id": "set-down-the-worry",
+      "passage_hint": "1PE.5.7",
+      "weight": 0.9
+    }
+  ],
+  "snippets": [
+    {
+      "id": "pause-and-release",
+      "locale": "en-US",
+      "text": "One slow breath. The result can arrive without carrying all your attention.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "work-with-purpose",
+      "locale": "en-US",
+      "text": "Let the build run. Return to the purpose beneath the task.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "make-room-for-wisdom",
+      "locale": "en-US",
+      "text": "The bug can wait five seconds. Make room for wisdom before the next attempt.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "hope-while-it-runs",
+      "locale": "en-US",
+      "text": "While the tests run, loosen your shoulders and hold on to hope.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "hold-the-plan-lightly",
+      "locale": "en-US",
+      "text": "Commit the work. Hold the outcome with open hands.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "notice-what-is-good",
+      "locale": "en-US",
+      "text": "Before finding the flaw, take a moment to notice what is true and good.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "you-can-rest",
+      "locale": "en-US",
+      "text": "This task is not a measure of your worth. Receive a moment of rest.",
+      "status": "approved-for-demo"
+    },
+    {
+      "id": "set-down-the-worry",
+      "locale": "en-US",
+      "text": "Name the worry, then set it down for the length of one breath.",
+      "status": "approved-for-demo"
+    }
+  ],
+  "offline_passages": [
+    {
+      "usfm": "PSA.46.10",
+      "reference": "Psalm 46:10",
+      "text": "Be still, and know that I am God. I will be exalted among the nations. I will be exalted in the earth.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "COL.3.23",
+      "reference": "Colossians 3:23",
+      "text": "And whatever you do, work heartily, as for the Lord, and not for men,",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "JAS.1.5",
+      "reference": "James 1:5",
+      "text": "But if any of you lacks wisdom, let him ask of God, who gives to all liberally and without reproach; and it will be given to him.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "ROM.12.12",
+      "reference": "Romans 12:12",
+      "text": "rejoicing in hope, enduring in troubles, continuing steadfastly in prayer,",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "PRO.16.3",
+      "reference": "Proverbs 16:3",
+      "text": "Commit your deeds to Yahweh, and your plans shall succeed.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "PHP.4.8",
+      "reference": "Philippians 4:8",
+      "text": "Finally, brothers, whatever things are true, whatever things are honorable, whatever things are just, whatever things are pure, whatever things are lovely, whatever things are of good report: if there is any virtue and if there is anything worthy of praise, think about these things.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "MAT.11.28",
+      "reference": "Matthew 11:28",
+      "text": "Come to me, all you who labor and are heavily burdened, and I will give you rest.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    },
+    {
+      "usfm": "1PE.5.7",
+      "reference": "1 Peter 5:7",
+      "text": "casting all your worries on him, because he cares for you.",
+      "version_id": "WEB",
+      "version_name": "World English Bible",
+      "copyright": "World English Bible — Public Domain",
+      "locale": "en-US"
+    }
+  ]
+}

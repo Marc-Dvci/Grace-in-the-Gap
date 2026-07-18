@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hooks/on-prompt.js"],
+            "async": true,
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

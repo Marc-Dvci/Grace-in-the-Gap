@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "grace-in-the-gap-marketplace",
+  "owner": {
+    "name": "Grace in the Gap"
+  },
+  "description": "Claude Code plugin that turns AI wait states into brief, live Scripture moments.",
+  "plugins": [
+    {
+      "name": "grace-in-the-gap",
+      "source": ".",
+      "description": "Private, opt-in Scripture micro-presence for Claude Code wait states, powered by Gloo and YouVersion.",
+      "category": "Productivity",
+      "defaultEnabled": false,
+      "tags": ["scripture", "wellbeing", "developer-tools"],
+      "strict": true
+    }
+  ]
+}
