@@ -114,7 +114,7 @@ src/providers/        Gloo + YouVersion live adapters and offline fallback
 src/service/          Validated selection and degradation pipeline
 tests/                Unit, contract, API, hook, and MCP tests (+ contract doubles)
 docs/                 Architecture, setup, and contest audit
-notebooks/            Kaggle-ready demonstration notebook
+notebooks/            Executed Kaggle technical-verification notebook
 dist/                 Self-contained marketplace runtime bundles
 ```
 
