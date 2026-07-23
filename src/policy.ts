@@ -32,7 +32,9 @@ export function evaluatePolicy(
 
 export function recordShown(state: PolicyState, now: Date): PolicyState {
   return {
-    date: now.toISOString().slice(0, 10),
+    // `loadPolicyState` already resolved this date in the user's IANA time
+    // zone. Keeping it avoids a UTC/local rollover mismatch around midnight.
+    date: state.date,
     shownToday: state.shownToday + 1,
     lastShownAt: now.toISOString()
   };

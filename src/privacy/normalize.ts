@@ -1,10 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { z } from "zod";
+import { resolveLiturgicalCalendar, timeWindowAt } from "../calendar/liturgical.js";
 import {
   DurationBucketSchema,
+  EffortBucketSchema,
+  OutcomeSchema,
+  RepeatBucketSchema,
   TaskTypeSchema,
-  TimeWindowSchema,
   WaitEventSchema,
+  WorkflowStageSchema,
+  type Preferences,
+  type SessionState,
   type TaskType,
   type WaitEvent
 } from "../domain.js";
@@ -19,19 +25,52 @@ export const ClaudeHookInputSchema = z.object({
 });
 
 const TASK_PATTERNS: readonly [TaskType, RegExp][] = [
-  ["debugging", /\b(debug|bug|fix|error|exception|failing|crash|broken|root cause)\b/i],
-  ["testing", /\b(test|tests|vitest|pytest|jest|coverage|benchmark|lint|typecheck)\b/i],
-  ["refactor", /\b(refactor|migrate|rewrite|modernize|clean up|optimi[sz]e)\b/i],
-  ["review", /\b(review|audit|inspect|security|critique|check my)\b/i],
-  ["planning", /\b(plan|design|architect|roadmap|strategy|specification)\b/i],
-  ["implementation", /\b(build|implement|create|add|develop|code|ship|scaffold)\b/i],
-  ["analysis", /\b(analy[sz]e|explain|investigate|research|compare|understand)\b/i],
-  ["generation", /\b(write|generate|draft|produce)\b/i]
+  ["debugging", /\b(debug|bug|fix|error|exception|failing|crash|broken|root cause|corriger|erreur|échec|plantage)\b/i],
+  ["testing", /\b(test|tests|vitest|pytest|jest|coverage|benchmark|lint|typecheck|tester|tests?|couverture)\b/i],
+  ["refactor", /\b(refactor|migrate|rewrite|modernize|clean up|optimi[sz]e|refactoriser|migrer|réécrire|optimiser)\b/i],
+  ["review", /\b(review|audit|inspect|security|critique|check my|réviser|auditer|inspecter|sécurité)\b/i],
+  ["planning", /\b(plan|design|architect|roadmap|strategy|specification|planifier|concevoir|architecture|stratégie)\b/i],
+  ["implementation", /\b(build|implement|create|add|develop|code|ship|scaffold|construire|implémenter|créer|ajouter|développer)\b/i],
+  ["analysis", /\b(analy[sz]e|explain|investigate|research|compare|understand|analyser|expliquer|rechercher|comparer|comprendre)\b/i],
+  ["generation", /\b(write|generate|draft|produce|écrire|générer|rédiger|produire)\b/i]
 ];
 
-function classifyTask(prompt: string): TaskType {
+export function classifyTaskTypes(prompt: string): TaskType[] {
+  const matches: TaskType[] = [];
   for (const [taskType, pattern] of TASK_PATTERNS) {
-    if (pattern.test(prompt)) return TaskTypeSchema.parse(taskType);
+    if (pattern.test(prompt)) matches.push(TaskTypeSchema.parse(taskType));
+  }
+  return matches.length > 0 ? matches.slice(0, 5) : ["unknown"];
+}
+
+function workflowStage(prompt: string): WaitEvent["workflowStage"] {
+  if (/\b(done|completed|fixed|resolved|passing now|works now|terminé|corrigé|résolu|fonctionne maintenant)\b/i.test(prompt)) {
+    return "completed";
+  }
+  if (/\b(recover|restore|roll back|regression|récupérer|restaurer|régression)\b/i.test(prompt)) {
+    return "recovering";
+  }
+  if (/\b(stuck|blocked|cannot figure|can't figure|keeps failing|still failing|again and again|bloqué|n'arrive pas|échoue encore)\b/i.test(prompt)) {
+    return "stuck";
+  }
+  if (/\b(retry|try again|rerun|again|second attempt|third attempt|réessayer|relancer|encore)\b/i.test(prompt)) {
+    return "retrying";
+  }
+  if (/\b(start|begin|new project|from scratch|commencer|nouveau projet|de zéro)\b/i.test(prompt)) {
+    return "starting";
+  }
+  return "unknown";
+}
+
+function outcome(prompt: string): WaitEvent["lastOutcome"] {
+  if (/\b(passed|succeeded|fixed|resolved|working now|réussi|corrigé|résolu)\b/i.test(prompt)) {
+    return "success";
+  }
+  if (/\b(partial|partly|some tests|incomplet|partiel|certains tests)\b/i.test(prompt)) {
+    return "partial";
+  }
+  if (/\b(fail|failing|failed|error|crash|broken|échec|échoue|erreur|plantage|cassé)\b/i.test(prompt)) {
+    return "failure";
   }
   return "unknown";
 }
@@ -63,29 +102,87 @@ function durationBucket(seconds: number): WaitEvent["durationBucket"] {
   return "over-30";
 }
 
-function timeWindow(date: Date): WaitEvent["timeWindow"] {
-  const hour = date.getHours();
-  if (hour < 5 || hour >= 22) return "late-evening";
-  if (hour < 12) return "morning";
-  if (hour < 18) return "afternoon";
-  return "evening";
+function effortBucket(
+  waitSeconds: number,
+  sessionState: SessionState | undefined
+): WaitEvent["effortBucket"] {
+  if (waitSeconds >= 30 || (sessionState?.turnCount ?? 0) >= 8) return "long-session";
+  if (waitSeconds >= 12 || (sessionState?.turnCount ?? 0) >= 3) return "sustained";
+  return "brief";
+}
+
+function repeatBucket(
+  explicitStage: WaitEvent["workflowStage"],
+  sessionState: SessionState | undefined,
+  primaryTask: TaskType
+): WaitEvent["repeatBucket"] {
+  const repeated = sessionState?.lastTaskType === primaryTask
+    ? sessionState.repeatedTaskCount + 1
+    : 0;
+  if (explicitStage === "stuck" || repeated >= 3) return "three-plus";
+  if (explicitStage === "retrying" || repeated >= 1) return "one-two";
+  return "none";
+}
+
+export function hashSessionId(sessionId: string, salt?: string): string {
+  if (salt) {
+    return createHmac("sha256", salt).update(sessionId).digest("hex").slice(0, 24);
+  }
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
 }
 
 export function normalizeClaudeHook(
   input: unknown,
-  options: { locale: string; contextMode: "private" | "local-labels"; now?: Date }
+  options: {
+    locale: string;
+    timeZone: string;
+    tradition: Preferences["tradition"];
+    preferredTone: Preferences["preferredTone"];
+    contextMode: "private" | "local-labels";
+    sessionState?: SessionState;
+    feedback?: {
+      preferredProfileIds: string[];
+      avoidedProfileIds: string[];
+      avoidedPassageIds: string[];
+    };
+    sessionSalt?: string;
+    now?: Date;
+  }
 ): WaitEvent {
   const hook = ClaudeHookInputSchema.parse(input);
-  const taskType = options.contextMode === "private" ? "unknown" : classifyTask(hook.prompt);
+  const taskTypes = options.contextMode === "private" ? ["unknown" as const] : classifyTaskTypes(hook.prompt);
+  const taskType = taskTypes[0] ?? "unknown";
   const estimatedWaitSeconds = estimateWaitSeconds(hook.prompt, taskType);
+  const now = options.now ?? new Date();
+  const stage = options.contextMode === "private" ? "unknown" : workflowStage(hook.prompt);
+  const lastOutcome = options.contextMode === "private" ? "unknown" : outcome(hook.prompt);
+  const calendar = resolveLiturgicalCalendar({
+    now,
+    timeZone: options.timeZone,
+    tradition: options.tradition
+  });
   const event = {
     surface: "claude-code" as const,
     taskType,
+    taskTypes,
     estimatedWaitSeconds,
     durationBucket: DurationBucketSchema.parse(durationBucket(estimatedWaitSeconds)),
     locale: options.locale,
-    timeWindow: TimeWindowSchema.parse(timeWindow(options.now ?? new Date())),
-    sessionHash: createHash("sha256").update(hook.session_id).digest("hex").slice(0, 24),
+    timeWindow: timeWindowAt(now, options.timeZone),
+    workflowStage: WorkflowStageSchema.parse(stage),
+    lastOutcome: OutcomeSchema.parse(lastOutcome),
+    repeatBucket: RepeatBucketSchema.parse(repeatBucket(stage, options.sessionState, taskType)),
+    effortBucket: EffortBucketSchema.parse(effortBucket(estimatedWaitSeconds, options.sessionState)),
+    tradition: options.tradition,
+    preferredTone: options.preferredTone,
+    calendar,
+    recentPassageIds: options.sessionState?.recentPassageIds ?? [],
+    recentSnippetIds: options.sessionState?.recentSnippetIds ?? [],
+    recentProfileIds: options.sessionState?.recentProfileIds ?? [],
+    preferredProfileIds: options.feedback?.preferredProfileIds ?? [],
+    avoidedProfileIds: options.feedback?.avoidedProfileIds ?? [],
+    avoidedPassageIds: options.feedback?.avoidedPassageIds ?? [],
+    sessionHash: hashSessionId(hook.session_id, options.sessionSalt),
     contextMode: options.contextMode
   };
   return WaitEventSchema.parse(event);
@@ -95,17 +192,47 @@ export function buildManualEvent(options: {
   taskType?: TaskType;
   locale: string;
   sessionSeed: string;
+  timeZone?: string;
+  tradition?: Preferences["tradition"];
+  preferredTone?: Preferences["preferredTone"];
+  workflowStage?: WaitEvent["workflowStage"];
+  lastOutcome?: WaitEvent["lastOutcome"];
+  repeatBucket?: WaitEvent["repeatBucket"];
+  recentPassageIds?: string[];
+  recentSnippetIds?: string[];
+  recentProfileIds?: string[];
+  preferredProfileIds?: string[];
+  avoidedProfileIds?: string[];
+  avoidedPassageIds?: string[];
   now?: Date;
   surface?: "mcp" | "api" | "demo";
 }): WaitEvent {
   const estimatedWaitSeconds = 12;
+  const now = options.now ?? new Date();
+  const timeZone = options.timeZone ?? "UTC";
+  const tradition = options.tradition ?? "ecumenical";
+  const taskType = options.taskType ?? "unknown";
   return WaitEventSchema.parse({
     surface: options.surface ?? "mcp",
-    taskType: options.taskType ?? "unknown",
+    taskType,
+    taskTypes: [taskType],
     estimatedWaitSeconds,
     durationBucket: "8-15",
     locale: options.locale,
-    timeWindow: timeWindow(options.now ?? new Date()),
+    timeWindow: timeWindowAt(now, timeZone),
+    workflowStage: options.workflowStage ?? "unknown",
+    lastOutcome: options.lastOutcome ?? "unknown",
+    repeatBucket: options.repeatBucket ?? "none",
+    effortBucket: "sustained",
+    tradition,
+    preferredTone: options.preferredTone ?? "balanced",
+    calendar: resolveLiturgicalCalendar({ now, timeZone, tradition }),
+    recentPassageIds: options.recentPassageIds ?? [],
+    recentSnippetIds: options.recentSnippetIds ?? [],
+    recentProfileIds: options.recentProfileIds ?? [],
+    preferredProfileIds: options.preferredProfileIds ?? [],
+    avoidedProfileIds: options.avoidedProfileIds ?? [],
+    avoidedPassageIds: options.avoidedPassageIds ?? [],
     sessionHash: createHash("sha256").update(options.sessionSeed).digest("hex").slice(0, 24),
     contextMode: "private"
   });

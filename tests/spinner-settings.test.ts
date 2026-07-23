@@ -36,12 +36,22 @@ describe("official Claude spinner settings", () => {
       durationSeconds: 5,
       tone: "calm",
       reflection: "One slow breath.",
+      reflectionLocale: "en-US",
       passage: {
         usfm: "PSA.46.10", reference: "Psalm 46:10", text: "Be still.",
         versionId: "3034", versionName: "BSB", copyright: "Berean Standard Bible — Public Domain", locale: "en-US"
       },
+      selection: {
+        profileId: "debug-with-wisdom",
+        snippetId: "pause-and-release",
+        passageId: "PSA.46.10",
+        themes: ["wisdom"],
+        reasonCodes: ["task-match"],
+        explanationVisible: true
+      },
       provenance: {
-        selector: "gloo-responses", scripture: "youversion-rest",
+        selector: "gloo-v2-tools", scripture: "youversion-rest",
+        selectorLive: true, scriptureLive: true,
         live: true, degraded: false, contentRelease: "test", citations: []
       },
       privacy: { rawPromptStored: false, rawPromptTransmitted: false, telemetryEnabled: false }

@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ContentRepository } from "../content/repository.js";
 import type { MomentExperience } from "../domain.js";
+import { providerLabel } from "../render.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -11,8 +12,11 @@ function objectValue(value: unknown): JsonObject {
 
 export function buildSpinnerPatch(content = new ContentRepository()): JsonObject {
   const tips = [...new Set(content.profiles.map((profile) => {
-    const snippet = content.getSnippet(profile.snippet_id, "en-US");
-    return `Grace · ${snippet.text} — ${content.referenceFor(profile.passage_hint)}`;
+    const snippetId = profile.snippet_ids[0];
+    const passageHint = profile.fallback_passage_hint;
+    if (!snippetId) throw new Error(`Profile ${profile.id} has no snippet`);
+    const snippet = content.getSnippet(snippetId, "en-US");
+    return `Grace · ${snippet.text} — ${content.referenceFor(passageHint)}`;
   }))];
   return {
     spinnerTipsEnabled: true,
@@ -28,13 +32,12 @@ export function buildSpinnerPatch(content = new ContentRepository()): JsonObject
 }
 
 export function buildMomentSpinnerPatch(moment: MomentExperience): JsonObject {
-  const label = moment.provenance.live ? "GLOO + YOUVERSION" : "OFFLINE · PUBLIC DOMAIN";
   return {
     spinnerTipsEnabled: true,
     spinnerTipsOverride: {
       excludeDefault: true,
       tips: [
-        `Grace · ${moment.reflection} — ${moment.passage.reference} · ${moment.passage.versionName} · ${moment.passage.copyright} · ${label}`
+        `Grace · ${moment.reflection} — ${moment.passage.reference} · ${moment.passage.versionName} · ${moment.passage.copyright} · ${providerLabel(moment)}`
       ]
     },
     spinnerVerbs: {

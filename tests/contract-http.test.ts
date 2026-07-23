@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("live provider adapters against contract doubles", () => {
-  it("exercises Gloo OAuth/Responses and the YouVersion passage + metadata paths", async () => {
+  it("exercises Gloo OAuth/V2 tools and the YouVersion passage + metadata paths", async () => {
     const contract = await startContractServer();
     server = contract.server;
     const { service } = createService(contractConfig(contract.baseUrl));
@@ -22,12 +22,16 @@ describe("live provider adapters against contract doubles", () => {
 
     const paths = contract.requests.map((request) => request.path);
     expect(paths).toContain("/oauth2/token");
-    expect(paths).toContain("/ai/v1/responses");
+    expect(paths).toContain("/ai/v2/chat/completions");
     expect(paths).toContain(`/v1/bibles/3034/passages/${moment.passage.usfm}`);
     expect(paths).toContain("/v1/bibles/3034");
+    const glooRequest = contract.requests.find((request) => request.path === "/ai/v2/chat/completions");
+    expect(glooRequest?.body).toMatchObject({ tool_choice: "required" });
 
     expect(JSON.stringify(contract.requests)).not.toContain("SECRET_RAW_PROMPT_MUST_NOT_LEAK");
     expect(moment.provenance.live).toBe(true);
+    expect(moment.provenance.selectorLive).toBe(true);
+    expect(moment.provenance.scriptureLive).toBe(true);
     expect(moment.provenance.degraded).toBe(false);
     expect(moment.passage.versionId).toBe("3034");
     expect(moment.passage.copyright).toContain("Public Domain");
@@ -46,7 +50,9 @@ describe("live provider adapters against contract doubles", () => {
     expect(moment.provenance.selector).toBe("local-rule-fallback");
     expect(moment.provenance.degraded).toBe(true);
     // Scripture is still fetched live even when the selector degrades.
-    expect(moment.provenance.live).toBe(true);
+    expect(moment.provenance.live).toBe(false);
+    expect(moment.provenance.selectorLive).toBe(false);
+    expect(moment.provenance.scriptureLive).toBe(true);
   });
 
   it("falls back to bundled public-domain Scripture when YouVersion is unavailable", async () => {

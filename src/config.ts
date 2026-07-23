@@ -1,6 +1,6 @@
 import { PreferencesSchema, type Preferences } from "./domain.js";
 
-export type GlooEndpointMode = "responses" | "grounded";
+export type GlooEndpointMode = "tools" | "grounded";
 
 export interface RuntimeConfig {
   preferences: Preferences;
@@ -31,6 +31,14 @@ function integerValue(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function hostTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const contextSetting = env.GRACE_CONTEXT_MODE || env.CLAUDE_PLUGIN_OPTION_CONTEXT_MODE;
   const contextMode = contextSetting === "private" ? "private" : "local-labels";
@@ -38,6 +46,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     enabled: booleanValue(env.GRACE_ENABLED ?? env.CLAUDE_PLUGIN_OPTION_ENABLED, true),
     locale: env.GRACE_LOCALE || env.CLAUDE_PLUGIN_OPTION_LOCALE || "en-US",
     bibleVersionId: env.GRACE_BIBLE_VERSION_ID || "3034",
+    timeZone: env.GRACE_TIME_ZONE || env.CLAUDE_PLUGIN_OPTION_TIME_ZONE || hostTimeZone(),
+    tradition: env.GRACE_TRADITION || env.CLAUDE_PLUGIN_OPTION_TRADITION || "ecumenical",
+    preferredTone:
+      env.GRACE_PREFERRED_TONE || env.CLAUDE_PLUGIN_OPTION_PREFERRED_TONE || "balanced",
+    showSelectionReason: booleanValue(
+      env.GRACE_SHOW_SELECTION_REASON ?? env.CLAUDE_PLUGIN_OPTION_SHOW_SELECTION_REASON,
+      true
+    ),
+    historyLimit: integerValue(
+      env.GRACE_HISTORY_LIMIT ?? env.CLAUDE_PLUGIN_OPTION_HISTORY_LIMIT,
+      12
+    ),
     minimumWaitSeconds: integerValue(
       env.GRACE_MIN_WAIT_SECONDS ?? env.CLAUDE_PLUGIN_OPTION_MINIMUM_WAIT_SECONDS,
       8
@@ -68,7 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
       model: env.GLOO_MODEL || "gloo-openai-gpt-5-mini",
       endpointMode: (env.GLOO_ENDPOINT_MODE || env.CLAUDE_PLUGIN_OPTION_GLOO_ENDPOINT_MODE) === "grounded"
         ? "grounded"
-        : "responses",
+        : "tools",
       ragPublisher: env.GLOO_RAG_PUBLISHER || env.CLAUDE_PLUGIN_OPTION_GLOO_RAG_PUBLISHER || "",
       tradition: env.GLOO_TRADITION || ""
     },

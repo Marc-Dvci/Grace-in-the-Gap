@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { PreferencesSchema, WaitEventSchema } from "../src/domain.js";
+import { PreferencesSchema } from "../src/domain.js";
 import { evaluatePolicy, recordShown } from "../src/policy.js";
+import { buildManualEvent } from "../src/privacy/normalize.js";
 
 const now = new Date("2026-07-18T12:00:00Z");
-const event = WaitEventSchema.parse({
-  surface: "demo",
+const event = buildManualEvent({
   taskType: "testing",
-  estimatedWaitSeconds: 12,
-  durationBucket: "8-15",
   locale: "en-US",
-  timeWindow: "afternoon",
-  sessionHash: "policy-session",
-  contextMode: "private"
+  sessionSeed: "policy-session",
+  now,
+  surface: "demo"
 });
 const preferences = PreferencesSchema.parse({});
 

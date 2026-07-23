@@ -7,9 +7,10 @@ import { PreferencesSchema, TaskTypeSchema } from "../domain.js";
 import { buildManualEvent } from "../privacy/normalize.js";
 import { renderTerminalCard } from "../render.js";
 import { createService } from "../service/factory.js";
+import { TelemetryWriter } from "../telemetry.js";
 
 const server = new McpServer(
-  { name: "grace-in-the-gap", version: "0.1.0" },
+  { name: "grace-in-the-gap", version: "0.2.0" },
   {
     instructions:
       "Grace provides brief pre-authored Scripture moments. Never send source code, file contents, or raw prompts to its tools."
@@ -34,16 +35,57 @@ server.registerTool(
     }
     const store = new GraceDataStore(config.dataDirectory);
     const preferences = await store.loadPreferences(config.preferences);
+    const feedback = await store.loadFeedbackContext();
     const { service } = createService({ ...config, preferences });
     const event = buildManualEvent({
       ...(taskType ? { taskType } : {}),
       locale: locale ?? preferences.locale,
+      timeZone: preferences.timeZone,
+      tradition: preferences.tradition,
+      preferredTone: preferences.preferredTone,
+      preferredProfileIds: feedback.preferredProfileIds,
+      avoidedProfileIds: feedback.avoidedProfileIds,
+      avoidedPassageIds: feedback.avoidedPassageIds,
       sessionSeed: `mcp:${new Date().toISOString().slice(0, 13)}`,
       surface: "mcp"
     });
     const moment = await service.create(event);
+    await store.recordPresentedMoment(moment);
     return {
       content: [{ type: "text" as const, text: renderTerminalCard(moment) }]
+    };
+  }
+);
+
+server.registerTool(
+  "grace_feedback",
+  {
+    title: "Rate a Grace moment",
+    description:
+      "Stores a 1-5 rating locally and uses it to personalize future approved profile and passage choices.",
+    inputSchema: z.object({
+      momentId: z.string().min(8).max(36).describe("The short Feedback ID printed on the card"),
+      rating: z.number().int().min(1).max(5)
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+  },
+  async ({ momentId, rating }) => {
+    const config = loadConfig();
+    const store = new GraceDataStore(config.dataDirectory);
+    const preferences = await store.loadPreferences(config.preferences);
+    const recorded = await store.recordFeedback(momentId, rating);
+    const telemetry = new TelemetryWriter(preferences.telemetryEnabled, store.telemetryPath);
+    await telemetry.write({
+      event: "feedback",
+      at: new Date().toISOString(),
+      traceId: recorded.traceId,
+      rating: recorded.rating
+    });
+    return {
+      content: [{
+        type: "text" as const,
+        text: "Feedback saved locally. Future selections will reflect it."
+      }]
     };
   }
 );
@@ -75,6 +117,9 @@ server.registerTool(
       cooldownMinutes: preferences.cooldownMinutes,
       maxCardsPerDay: preferences.maxCardsPerDay,
       locale: preferences.locale,
+      timeZone: preferences.timeZone,
+      tradition: preferences.tradition,
+      preferredTone: preferences.preferredTone,
       dataDirectory: store.directory
     };
     return { content: [{ type: "text" as const, text: JSON.stringify(status, null, 2) }] };

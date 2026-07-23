@@ -1,6 +1,6 @@
 ---
 name: configure
-description: Configure Grace in the Gap consent, cooldown, daily limit, locale, or contextual selection after the user explicitly asks.
+description: Configure Grace consent, cooldown, cap, locale, timezone, tradition, tone, explanations, history, or contextual selection after the user explicitly asks.
 allowed-tools: mcp__plugin_grace-in-the-gap_configure_grace
 disable-model-invocation: true
 ---

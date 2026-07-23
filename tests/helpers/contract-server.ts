@@ -2,12 +2,13 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { listen } from "../../src/api/server.js";
 import { ContentRepository } from "../../src/content/repository.js";
 import { selectLocally } from "../../src/selection/local-selector.js";
+import { buildManualEvent } from "../../src/privacy/normalize.js";
 import { WaitEventSchema, type TaskType, type WaitEvent } from "../../src/domain.js";
 
 /**
  * Test-only contract double for the Gloo and YouVersion HTTP APIs. It reproduces
- * the real request/response shapes (OAuth2 client-credentials, Gloo Responses /
- * Grounded, YouVersion Bible metadata + Passages) so the production adapters can
+ * the real request/response shapes (OAuth2 client credentials, Gloo V2 tools /
+ * grounded, YouVersion Bible metadata + passages) so the production adapters can
  * be exercised end to end without billable calls. It is never bundled into the
  * product and is not reachable from any runtime command.
  */
@@ -53,14 +54,26 @@ function findSafeInput(body: unknown): Record<string, unknown> {
 function buildEvent(input: Record<string, unknown>): WaitEvent {
   const taskType = typeof input.taskType === "string" ? input.taskType as TaskType : "unknown";
   const durationBucket = typeof input.durationBucket === "string" ? input.durationBucket : "8-15";
-  return WaitEventSchema.parse({
-    surface: "demo",
+  const base = buildManualEvent({
     taskType,
+    locale: typeof input.locale === "string" ? input.locale : "en-US",
+    sessionSeed: "contract-test-session",
+    timeZone: "UTC",
+    tradition: "ecumenical",
+    now: new Date("2026-07-18T14:00:00Z"),
+    surface: "demo"
+  });
+  return WaitEventSchema.parse({
+    ...base,
+    taskTypes: Array.isArray(input.taskTypes) ? input.taskTypes : [taskType],
     estimatedWaitSeconds: durationBucket === "16-30" ? 20 : 12,
     durationBucket,
-    locale: typeof input.locale === "string" ? input.locale : "en-US",
     timeWindow: typeof input.timeWindow === "string" ? input.timeWindow : "afternoon",
-    sessionHash: "contract-test-session",
+    workflowStage: typeof input.workflowStage === "string" ? input.workflowStage : "unknown",
+    lastOutcome: typeof input.lastOutcome === "string" ? input.lastOutcome : "unknown",
+    repeatBucket: typeof input.repeatBucket === "string" ? input.repeatBucket : "none",
+    effortBucket: typeof input.effortBucket === "string" ? input.effortBucket : "sustained",
+    preferredTone: typeof input.preferredTone === "string" ? input.preferredTone : "balanced",
     contextMode: input.contextMode === "local-labels" ? "local-labels" : "private"
   });
 }
@@ -84,29 +97,44 @@ export async function startContractServer(
 
       if (
         request.method === "POST" &&
-        ["/ai/v1/responses", "/ai/v2/chat/completions/grounded"].includes(url.pathname)
+        ["/ai/v2/chat/completions", "/ai/v2/chat/completions/grounded"].includes(url.pathname)
       ) {
         const event = buildEvent(findSafeInput(body));
         const decision = selectLocally(event, content.candidatesFor(event));
         const text = options.invalidGlooJson ? "not valid JSON" : JSON.stringify(decision);
-        if (url.pathname.endsWith("grounded")) {
-          response.end(JSON.stringify({
-            choices: [{ message: { role: "assistant", content: text } }],
-            citations: ["contract://grounded-content/release"]
-          }));
-        } else {
-          response.end(JSON.stringify({
-            id: "resp_contract",
-            object: "response",
-            output: [{
-              type: "message",
-              role: "assistant",
-              status: "completed",
-              content: [{ type: "output_text", text }]
-            }],
-            usage: { input_tokens: 100, output_tokens: 60, total_tokens: 160 }
-          }));
-        }
+        response.end(JSON.stringify({
+          id: "chatcmpl_contract",
+          choices: [{
+            message: options.invalidGlooJson
+              ? { role: "assistant", content: text }
+              : {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [{
+                    id: "call_contract",
+                    type: "function",
+                    function: { name: "select_grace_moment", arguments: text }
+                  }]
+                }
+          }],
+          ...(url.pathname.endsWith("grounded")
+            ? { citations: ["contract://grounded-content/release"] }
+            : {})
+        }));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/bibles") {
+        response.end(JSON.stringify({
+          data: [{
+            id: 3034,
+            abbreviation: "WEB",
+            title: "World English Bible",
+            localized_title: "World English Bible",
+            language_tag: "en",
+            copyright: "\"World English Bible — Public Domain\""
+          }]
+        }));
         return;
       }
 
@@ -118,9 +146,12 @@ export async function startContractServer(
           return;
         }
         const usfm = decodeURIComponent(passageMatch[2] ?? "PSA.46.10");
-        const passage = content.getOfflinePassage(usfm, "en-US");
         // Real passages endpoint returns a flat object with no copyright.
-        response.end(JSON.stringify({ id: usfm, content: passage.text, reference: passage.reference }));
+        response.end(JSON.stringify({
+          id: usfm,
+          content: `Contract passage text for ${content.referenceFor(usfm)}.`,
+          reference: content.referenceFor(usfm)
+        }));
         return;
       }
 
@@ -160,12 +191,17 @@ export async function startContractServer(
 }
 
 /** Builds a RuntimeConfig pointed at a contract server with fake-but-present credentials. */
-export function contractConfig(baseUrl: string, overrides: { endpointMode?: "responses" | "grounded" } = {}) {
+export function contractConfig(baseUrl: string, overrides: { endpointMode?: "tools" | "grounded" } = {}) {
   return {
     preferences: {
       enabled: true,
       locale: "en-US",
       bibleVersionId: "3034",
+      timeZone: "UTC",
+      tradition: "ecumenical" as const,
+      preferredTone: "balanced" as const,
+      showSelectionReason: true,
+      historyLimit: 12,
       minimumWaitSeconds: 8,
       cooldownMinutes: 10,
       maxCardsPerDay: 6,
@@ -179,7 +215,7 @@ export function contractConfig(baseUrl: string, overrides: { endpointMode?: "res
       clientSecret: "contract-secret",
       baseUrl,
       model: "gloo-openai-gpt-5-mini",
-      endpointMode: overrides.endpointMode ?? ("responses" as const),
+      endpointMode: overrides.endpointMode ?? ("tools" as const),
       ragPublisher: overrides.endpointMode === "grounded" ? "GraceInTheGap" : "",
       tradition: ""
     },

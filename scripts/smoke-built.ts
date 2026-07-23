@@ -63,15 +63,26 @@ async function smokeMcp(baseUrl: string, dataDirectory: string): Promise<void> {
     args: [mcpPath],
     env: environment(baseUrl, { GRACE_DATA_DIR: dataDirectory })
   });
-  const client = new Client({ name: "built-smoke", version: "0.1.0" });
+  const client = new Client({ name: "built-smoke", version: "0.2.0" });
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    if (tools.tools.length !== 3) throw new Error(`Expected 3 MCP tools, found ${tools.tools.length}`);
+    const names = tools.tools.map((tool) => tool.name).sort();
+    const expected = ["configure_grace", "grace_feedback", "grace_moment", "grace_status"];
+    if (JSON.stringify(names) !== JSON.stringify(expected)) {
+      throw new Error(`Unexpected built MCP tools: ${names.join(", ")}`);
+    }
     const result = await client.callTool({ name: "grace_moment", arguments: { taskType: "testing" } });
     if (result.isError || !JSON.stringify(result.content).includes("Grace in the Gap")) {
       throw new Error("Built MCP server did not return a Grace moment");
     }
+    const feedbackId = JSON.stringify(result.content).match(/Feedback ID: ([0-9a-f]{8})/)?.[1];
+    if (!feedbackId) throw new Error("Built MCP card omitted its feedback ID");
+    const feedback = await client.callTool({
+      name: "grace_feedback",
+      arguments: { momentId: feedbackId, rating: 5 }
+    });
+    if (feedback.isError) throw new Error("Built MCP feedback tool failed");
   } finally {
     await client.close();
   }

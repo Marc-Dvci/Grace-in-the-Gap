@@ -9,7 +9,21 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       include: ["src/**/*.ts"],
-      exclude: ["src/**/main.ts", "src/mcp/server.ts"]
+      // CLI/hook/MCP/evaluation entrypoints are exercised in subprocess and
+      // smoke gates, whose coverage is not merged into V8's in-process report.
+      exclude: [
+        "src/**/main.ts",
+        "src/cli.ts",
+        "src/evaluation/**",
+        "src/hooks/**",
+        "src/mcp/server.ts"
+      ],
+      thresholds: {
+        statements: 80,
+        branches: 70,
+        functions: 85,
+        lines: 82
+      }
     }
   }
 });

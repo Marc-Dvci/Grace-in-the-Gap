@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PassageSchema, type ScriptureProvider, type ScriptureResult } from "../domain.js";
-import { fetchWithTimeout, parseJsonResponse, type FetchLike } from "./http.js";
+import { fetchJsonWithRetry, type FetchLike } from "./http.js";
 
 interface YouVersionOptions {
   appKey: string;
@@ -29,8 +29,15 @@ function firstString(record: Record<string, unknown> | undefined, keys: string[]
 /** Publisher copyright strings are sometimes returned wrapped in literal quotes. */
 function unwrapQuotes(value: string): string {
   const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).trim();
+  const pairs = [
+    ['"', '"'],
+    ["“", "”"],
+    ["«", "»"]
+  ] as const;
+  for (const [opening, closing] of pairs) {
+    if (trimmed.length >= 2 && trimmed.startsWith(opening) && trimmed.endsWith(closing)) {
+      return trimmed.slice(opening.length, -closing.length).trim();
+    }
   }
   return trimmed;
 }
@@ -39,6 +46,7 @@ interface BibleMetadata {
   versionId: string;
   versionName: string;
   copyright: string;
+  languageTag: string;
 }
 
 /**
@@ -62,15 +70,16 @@ export class YouVersionProvider implements ScriptureProvider {
   }
 
   async getPassage(versionId: string, usfm: string, locale: string): Promise<ScriptureResult> {
+    const resolvedVersionId = await this.resolveVersionId(versionId, locale);
     const passageUrl = new URL(
-      `/v1/bibles/${encodeURIComponent(versionId)}/passages/${encodeURIComponent(usfm)}`,
+      `/v1/bibles/${encodeURIComponent(resolvedVersionId)}/passages/${encodeURIComponent(usfm)}`,
       `${this.options.baseUrl}/`
     );
     passageUrl.searchParams.set("format", "text");
 
     const [passageBody, metadata] = await Promise.all([
       this.get(passageUrl, locale, "YouVersion passage"),
-      this.getBibleMetadata(versionId, locale)
+      this.getBibleMetadata(resolvedVersionId, locale)
     ]);
 
     // The passage payload is a flat object; tolerate an optional `data` wrapper.
@@ -82,11 +91,11 @@ export class YouVersionProvider implements ScriptureProvider {
     const passage = PassageSchema.parse({
       usfm,
       reference: firstString(data, ["reference", "human_reference", "display_reference"]) ?? usfm,
-      text,
+      text: unwrapQuotes(text),
       versionId: metadata.versionId,
       versionName: metadata.versionName,
       copyright: metadata.copyright,
-      locale
+      locale: metadata.languageTag
     });
     return {
       passage,
@@ -98,8 +107,49 @@ export class YouVersionProvider implements ScriptureProvider {
     };
   }
 
+  private async resolveVersionId(requestedVersionId: string, locale: string): Promise<string> {
+    const requestedLanguage = locale.toLowerCase().split("-")[0] ?? locale.toLowerCase();
+    if (requestedVersionId !== "auto") {
+      try {
+        const metadata = await this.getBibleMetadata(requestedVersionId, locale);
+        const versionLanguage = metadata.languageTag.toLowerCase().split("-")[0];
+        if (versionLanguage === requestedLanguage) return metadata.versionId;
+      } catch {
+        // An unlicensed, retired, or invalid configured version should not
+        // prevent discovery of another licensed Bible in the user's language.
+      }
+    }
+
+    let pageToken: string | undefined;
+    for (let page = 0; page < 4; page += 1) {
+      const url = new URL("/v1/bibles", `${this.options.baseUrl}/`);
+      url.searchParams.set("language_ranges", `${requestedLanguage}*`);
+      url.searchParams.set("page_size", "25");
+      if (pageToken) url.searchParams.set("page_token", pageToken);
+      const body = await this.get(url, locale, "YouVersion bible collection");
+      const record = asRecord(body);
+      const data = Array.isArray(record?.data) ? record.data : [];
+      for (const item of data) {
+        const candidate = asRecord(item);
+        const id = firstString(candidate, ["id"]);
+        const languageTag = firstString(candidate, ["language_tag"]);
+        if (
+          id &&
+          languageTag?.toLowerCase().split("-")[0] === requestedLanguage &&
+          firstString(candidate, ["copyright", "promotional_content"])
+        ) {
+          return id;
+        }
+      }
+      pageToken = firstString(record, ["next_page_token"]);
+      if (!pageToken) break;
+    }
+    throw new Error(`YouVersion returned no licensed Bible for locale ${locale}`);
+  }
+
   private async getBibleMetadata(versionId: string, locale: string): Promise<BibleMetadata> {
-    const cached = this.metadataCache.get(versionId);
+    const cacheKey = `${versionId}:${locale.toLowerCase()}`;
+    const cached = this.metadataCache.get(cacheKey);
     if (cached) return cached;
 
     const url = new URL(`/v1/bibles/${encodeURIComponent(versionId)}`, `${this.options.baseUrl}/`);
@@ -115,14 +165,15 @@ export class YouVersionProvider implements ScriptureProvider {
       versionName:
         firstString(record, ["abbreviation", "localized_abbreviation", "title", "localized_title"]) ??
         `Bible ${versionId}`,
-      copyright: unwrapQuotes(copyright)
+      copyright: unwrapQuotes(copyright),
+      languageTag: firstString(record, ["language_tag"]) ?? locale
     };
-    this.metadataCache.set(versionId, metadata);
+    this.metadataCache.set(cacheKey, metadata);
     return metadata;
   }
 
   private async get(url: URL, locale: string, label: string): Promise<unknown> {
-    const response = await fetchWithTimeout(
+    return fetchJsonWithRetry(
       this.fetchImplementation,
       url,
       {
@@ -133,8 +184,8 @@ export class YouVersionProvider implements ScriptureProvider {
           Accept: "application/json"
         }
       },
-      this.timeoutMs
+      this.timeoutMs,
+      label
     );
-    return parseJsonResponse(response, label);
   }
 }

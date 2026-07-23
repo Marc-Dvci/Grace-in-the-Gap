@@ -2,6 +2,7 @@ node_modules/
 coverage/
 demo-video/
 submission/
+docs/CONTEST_AUDIT.md
 .env
 *.log
 .grace-data/

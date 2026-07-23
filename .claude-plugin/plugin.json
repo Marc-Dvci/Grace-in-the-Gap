@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "grace-in-the-gap",
   "description": "Turns Claude Code wait states into brief, private, opt-in Scripture moments using Gloo and YouVersion adapters.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "defaultEnabled": false,
   "author": {
     "name": "Grace in the Gap"
@@ -25,8 +25,40 @@
     "locale": {
       "type": "string",
       "title": "Locale",
-      "description": "BCP 47 locale for moments.",
+      "description": "BCP 47 locale for reviewed reflections and a matching YouVersion Bible.",
       "default": "en-US"
+    },
+    "time_zone": {
+      "type": "string",
+      "title": "Time zone",
+      "description": "IANA time zone used for local day, time window, and the church calendar.",
+      "default": "UTC"
+    },
+    "tradition": {
+      "type": "string",
+      "title": "Calendar tradition",
+      "description": "ecumenical, catholic, mainline, or evangelical. Saints and local observances never apply without this choice.",
+      "default": "ecumenical"
+    },
+    "preferred_tone": {
+      "type": "string",
+      "title": "Preferred tone",
+      "description": "balanced, calm, steady, encouraging, or reflective.",
+      "default": "balanced"
+    },
+    "show_selection_reason": {
+      "type": "boolean",
+      "title": "Explain selection",
+      "description": "Show up to three privacy-safe reason labels such as task, season, or retry context.",
+      "default": true
+    },
+    "history_limit": {
+      "type": "number",
+      "title": "Local diversity memory",
+      "description": "Number of recent profiles, snippets, and passages retained locally to reduce repetition.",
+      "default": 12,
+      "min": 3,
+      "max": 30
     },
     "context_mode": {
       "type": "string",
@@ -79,8 +111,8 @@
     "gloo_endpoint_mode": {
       "type": "string",
       "title": "Gloo endpoint mode",
-      "description": "Use responses for a new account or grounded after publishing the content library.",
-      "default": "responses"
+      "description": "Use tools for schema-enforced V2 selection or grounded after publishing the project-owned catalog.",
+      "default": "tools"
     },
     "gloo_rag_publisher": {
       "type": "string",

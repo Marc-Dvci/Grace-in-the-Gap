@@ -6,14 +6,14 @@ import {
   type SelectorResult,
   type WaitEvent
 } from "../domain.js";
-import { fetchWithTimeout, parseJsonResponse, type FetchLike } from "./http.js";
+import { fetchJsonWithRetry, type FetchLike } from "./http.js";
 
 interface GlooOptions {
   clientId: string;
   clientSecret: string;
   baseUrl: string;
   model: string;
-  endpointMode: "responses" | "grounded";
+  endpointMode: "tools" | "grounded";
   ragPublisher: string;
   tradition: string;
   fetchImplementation?: FetchLike;
@@ -41,54 +41,88 @@ export class GlooSelector implements SelectorProvider {
       throw new Error("GLOO_RAG_PUBLISHER is required for grounded endpoint mode");
     }
     this.fetchImplementation = options.fetchImplementation ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 10_000;
+    // Tool-capable completions can exceed a chat-sized 10s budget on a cold
+    // route. The hook is asynchronous, so a 30s provider budget preserves
+    // reliability without delaying Claude's work.
+    this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
   async select(event: WaitEvent, candidates: readonly Profile[]): Promise<SelectorResult> {
     const token = await this.getAccessToken();
     const instructions = this.buildInstructions(candidates);
+    const tool = this.buildSelectionTool(candidates);
     const safeInput = JSON.stringify({
       surface: event.surface,
       taskType: event.taskType,
+      taskTypes: event.taskTypes,
       durationBucket: event.durationBucket,
       locale: event.locale,
       timeWindow: event.timeWindow,
+      workflowStage: event.workflowStage,
+      lastOutcome: event.lastOutcome,
+      repeatBucket: event.repeatBucket,
+      effortBucket: event.effortBucket,
+      tradition: event.tradition,
+      preferredTone: event.preferredTone,
+      calendar: event.calendar,
+      recentPassageIds: event.recentPassageIds,
+      recentSnippetIds: event.recentSnippetIds,
+      recentProfileIds: event.recentProfileIds,
+      preferredProfileIds: event.preferredProfileIds,
+      avoidedProfileIds: event.avoidedProfileIds,
+      avoidedPassageIds: event.avoidedPassageIds,
       contextMode: event.contextMode
     });
+    const tradition = this.options.tradition ||
+      (event.tradition === "ecumenical" ? "" : event.tradition);
 
+    const sharedBody = {
+      messages: [
+        { role: "system", content: instructions },
+        { role: "user", content: safeInput }
+      ],
+      tools: [tool],
+      tool_choice: "required",
+      temperature: 0,
+      ...(tradition ? { tradition } : {})
+    };
     const request = this.options.endpointMode === "grounded"
       ? {
           url: `${this.options.baseUrl}/ai/v2/chat/completions/grounded`,
           body: {
-            messages: [
-              { role: "system", content: instructions },
-              { role: "user", content: safeInput }
-            ],
+            ...sharedBody,
             auto_routing: true,
             rag_publisher: this.options.ragPublisher,
-            sources_limit: 3,
-            ...(this.options.tradition ? { tradition: this.options.tradition } : {})
+            sources_limit: 5,
+            include_citations: true
           }
         }
       : {
-          url: `${this.options.baseUrl}/ai/v1/responses`,
+          url: `${this.options.baseUrl}/ai/v2/chat/completions`,
           body: {
+            ...sharedBody,
             model: this.options.model,
-            instructions,
-            input: [{ role: "user", content: safeInput }]
+            max_tokens: 300
           }
         };
 
-    const response = await fetchWithTimeout(this.fetchImplementation, request.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+    const body = await fetchJsonWithRetry(
+      this.fetchImplementation,
+      request.url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(request.body)
       },
-      body: JSON.stringify(request.body)
-    }, this.timeoutMs);
-    const body = await parseJsonResponse(response, "Gloo");
-    const decision = SelectorDecisionSchema.parse(JSON.parse(this.extractText(body)) as unknown);
+      this.timeoutMs,
+      "Gloo"
+    );
+    const decision = SelectorDecisionSchema.parse(
+      JSON.parse(this.extractDecisionPayload(body)) as unknown
+    );
     return {
       decision,
       metadata: {
@@ -104,7 +138,7 @@ export class GlooSelector implements SelectorProvider {
       return this.accessToken.value;
     }
     const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
-    const response = await fetchWithTimeout(
+    const body = await fetchJsonWithRetry(
       this.fetchImplementation,
       `${this.options.baseUrl}/oauth2/token`,
       {
@@ -115,9 +149,10 @@ export class GlooSelector implements SelectorProvider {
         },
         body: new URLSearchParams({ grant_type: "client_credentials", scope: "api/access" })
       },
-      this.timeoutMs
+      this.timeoutMs,
+      "Gloo auth"
     );
-    const token = TokenResponseSchema.parse(await parseJsonResponse(response, "Gloo auth"));
+    const token = TokenResponseSchema.parse(body);
     this.accessToken = {
       value: token.access_token,
       expiresAt: Date.now() + token.expires_in * 1000
@@ -126,29 +161,104 @@ export class GlooSelector implements SelectorProvider {
   }
 
   private buildInstructions(candidates: readonly Profile[]): string {
-    const allowed = candidates.map((profile) => ({
+    const allowed = candidates.map((profile, index) => ({
+      contextRank: index + 1,
       momentProfileId: profile.id,
-      reflectionSnippetId: profile.snippet_id,
-      passageHint: profile.passage_hint,
-      tone: profile.tone
+      themes: profile.themes,
+      reflectionSnippetIds: profile.snippet_ids,
+      passageHints: profile.passage_hints,
+      tone: profile.tone,
+      workflowStages: profile.workflow_stages ?? [],
+      liturgicalSeasons: profile.liturgical_seasons ?? [],
+      observanceIds: profile.observance_ids ?? [],
+      weight: profile.weight
     }));
     return [
-      "You are a structured selector for Grace in the Gap.",
-      "Return one valid JSON object only: no Markdown and no user-facing prose.",
-      "Choose one allowed candidate without changing any candidate field.",
-      "Use durationSeconds 5 or 8, confidence from 0 to 1, fallbackVotd false, and needsAuth false.",
+      "You are the private, structured ranking layer for Grace in the Gap.",
+      "Call select_grace_moment exactly once. Never return user-facing prose.",
+      "Choose a profile, snippet, passage, and tone only from one internally consistent allowed profile.",
+      "Prioritize an exact supplied lectionary reference, workflow stage, task fit, and non-repetition.",
+      "contextRank is the local editorial prior after calendar, preferences, and repetition scoring; normally choose rank 1.",
+      "Treat calendar and workflow as contextual signals; do not invent emotions or spiritual claims.",
+      "Use durationSeconds 5 or 8, conservative confidence, fallbackVotd false, and needsAuth false.",
+      "Return concise kebab-case reasonCodes that describe only supplied structured context.",
       `Allowed candidates: ${JSON.stringify(allowed)}`,
-      "Required camelCase keys: momentProfileId, reflectionSnippetId, passageHint, durationSeconds, tone, confidence, fallbackVotd, needsAuth."
+      "The function schema is authoritative."
     ].join("\n");
   }
 
-  private extractText(body: unknown): string {
+  private buildSelectionTool(candidates: readonly Profile[]) {
+    const profileIds = candidates.map((profile) => profile.id);
+    const snippetIds = [...new Set(candidates.flatMap((profile) => profile.snippet_ids))];
+    const passageHints = [...new Set(candidates.flatMap((profile) => profile.passage_hints))];
+    const tones = [...new Set(candidates.map((profile) => profile.tone))];
+    return {
+      type: "function",
+      function: {
+        name: "select_grace_moment",
+        description: "Select one editorially approved Grace moment by ID.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            momentProfileId: { type: "string", enum: profileIds },
+            reflectionSnippetId: { type: "string", enum: snippetIds },
+            passageHint: { type: "string", enum: passageHints },
+            durationSeconds: { type: "integer", enum: [5, 8] },
+            tone: { type: "string", enum: tones },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+            fallbackVotd: { type: "boolean", enum: [false] },
+            needsAuth: { type: "boolean", enum: [false] },
+            reasonCodes: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string", pattern: "^[a-z0-9-]+$" }
+            }
+          },
+          required: [
+            "momentProfileId",
+            "reflectionSnippetId",
+            "passageHint",
+            "durationSeconds",
+            "tone",
+            "confidence",
+            "fallbackVotd",
+            "needsAuth",
+            "reasonCodes"
+          ]
+        }
+      }
+    };
+  }
+
+  private extractDecisionPayload(body: unknown): string {
     const record = GenericObjectSchema.parse(body);
     const choices = record.choices;
     if (Array.isArray(choices)) {
       const first = GenericObjectSchema.safeParse(choices[0]);
       const message = first.success ? GenericObjectSchema.safeParse(first.data.message) : undefined;
-      if (message?.success && typeof message.data.content === "string") return message.data.content.trim();
+      const toolCalls = message?.success ? message.data.tool_calls : undefined;
+      if (Array.isArray(toolCalls)) {
+        for (const toolCall of toolCalls) {
+          const parsedCall = GenericObjectSchema.safeParse(toolCall);
+          const functionCall = parsedCall.success
+            ? GenericObjectSchema.safeParse(parsedCall.data.function)
+            : undefined;
+          if (
+            functionCall?.success &&
+            functionCall.data.name === "select_grace_moment" &&
+            typeof functionCall.data.arguments === "string"
+          ) {
+            return functionCall.data.arguments.trim();
+          }
+        }
+      }
+      // Compatibility fallback for grounded accounts that return validated JSON
+      // as assistant content even when a required tool was supplied.
+      if (message?.success && typeof message.data.content === "string") {
+        return message.data.content.trim();
+      }
     }
     const output = record.output;
     if (Array.isArray(output)) {
@@ -165,7 +275,7 @@ export class GlooSelector implements SelectorProvider {
         }
       }
     }
-    throw new Error("Gloo response did not contain assistant JSON text");
+    throw new Error("Gloo response did not contain selection tool arguments");
   }
 
   private extractCitations(body: unknown): string[] {

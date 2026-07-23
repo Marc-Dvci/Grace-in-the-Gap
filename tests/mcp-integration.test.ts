@@ -41,12 +41,12 @@ describe("MCP server", () => {
         YOUVERSION_BASE_URL: contract.baseUrl
       })
     });
-    const client = new Client({ name: "grace-test-client", version: "0.1.0" });
+    const client = new Client({ name: "grace-test-client", version: "0.2.0" });
     try {
       await client.connect(transport);
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
-        "configure_grace", "grace_moment", "grace_status"
+        "configure_grace", "grace_feedback", "grace_moment", "grace_status"
       ]);
       const result = await client.callTool({
         name: "grace_moment",
@@ -55,6 +55,13 @@ describe("MCP server", () => {
       expect(result.isError).not.toBe(true);
       expect(JSON.stringify(result.content)).toContain("Grace in the Gap");
       expect(JSON.stringify(result.content)).toContain("GLOO + YOUVERSION");
+      const feedbackId = JSON.stringify(result.content).match(/Feedback ID: ([0-9a-f]{8})/)?.[1];
+      expect(feedbackId).toBeTruthy();
+      const feedback = await client.callTool({
+        name: "grace_feedback",
+        arguments: { momentId: feedbackId, rating: 5 }
+      });
+      expect(JSON.stringify(feedback.content)).toContain("Feedback saved locally");
     } finally {
       await client.close();
     }

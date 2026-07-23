@@ -34,7 +34,8 @@ export function createService(config: RuntimeConfig = loadConfig()): ServiceBund
       scripture,
       offlineScripture,
       config.preferences.bibleVersionId,
-      config.preferences.telemetryEnabled
+      config.preferences.telemetryEnabled,
+      config.preferences.showSelectionReason
     )
   };
 }

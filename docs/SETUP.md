@@ -1,51 +1,48 @@
 # Setup and first live run
 
-Grace in the Gap makes real Gloo and YouVersion calls on every card. This is the
-checklist to go from zero to one verified live moment. Both APIs are free for
-registered challenge participants.
+Grace needs Gloo and YouVersion credentials for its normal path. Controlled local/public-domain fallbacks preserve the experience during outages, but a fallback card is not proof of live integration.
 
 ## 1. Provision credentials
 
-### Gloo AI Studio
+### Gloo
 
-1. Create a Gloo AI Studio organization and sign in.
-2. Set the lowest practical weekly spend limit while testing.
-3. Open **API Credentials** and create a Client ID + Client Secret.
-4. Start in **Responses** mode — it uses the quickstart endpoint and needs no publisher.
-5. Later, ingest only Grace-owned moment/reflection metadata and set a publisher to
-   enable **Grounded** mode. Never ingest YouVersion Bible text into Gloo.
+1. Create a Gloo organization and a client ID/secret.
+2. Keep a low testing spend limit.
+3. Start with V2 `tools` mode. It uses required function calling and needs no content publisher.
+4. Use `grounded` only after publishing a Grace-owned metadata library. Never ingest YouVersion Bible text into Gloo.
 
-### YouVersion Platform
+### YouVersion
 
-1. Register the application in the YouVersion Platform portal and copy the App Key.
-2. Confirm which Bible/version IDs your app key is licensed for (the default is
-   version `3034`, the public-domain Berean Standard Bible).
-3. Confirm the rendering and copyright-attribution requirements for that version.
-   Grace fetches the version's copyright from `GET /v1/bibles/{id}` and always
-   displays it — it never shows a passage without attribution.
+1. Register the application and copy its App Key.
+2. Accept the relevant Bible licenses for the app.
+3. Confirm each selected version's display and attribution requirements.
 
-## 2. Configure secrets safely
+The configured default is Bible ID `3034` (BSB). At runtime Grace checks its language. If it does not match the requested locale, the adapter queries the app's licensed Bible collection and selects an attributed matching version.
 
-Preferred (plugin): install/enable the plugin and enter the sensitive `userConfig`
-values. Claude Code stores them in secure storage and exposes them only to the
-plugin's own subprocesses.
+## 2. Configure secrets
 
-CLI / local: copy `.env.example` to `.env` and fill in the three values. The CLI
-auto-loads `.env`. Never commit `.env` or show it in a recording.
+Plugin installation should use sensitive plugin configuration. For local CLI work, copy the ignored example:
 
 ```powershell
-copy .env.example .env   # then edit
+copy .env.example .env
 ```
 
-Minimum required keys:
+Set only:
 
 ```text
-GLOO_CLIENT_ID, GLOO_CLIENT_SECRET, YVP_APP_KEY
+GLOO_CLIENT_ID
+GLOO_CLIENT_SECRET
+YVP_APP_KEY
 ```
 
-## 3. Run one Responses canary
+The CLI auto-loads `.env`. Never commit it, paste credentials into documentation/notebooks, or show it in a recording.
+
+## 3. Run the quality and provider canaries
 
 ```powershell
+npm ci
+npm run check
+npm run canary:live
 npm run build
 node dist/cli.js status
 node dist/cli.js moment debugging
@@ -54,32 +51,62 @@ node dist/cli.js spinner sync
 
 Pass criteria:
 
-- `status` reports both credentials `configured`.
-- The card is labelled `GLOO + YOUVERSION` (not the offline fallback).
-- Gloo returns strict JSON that maps to an exact catalog combination.
-- YouVersion returns non-empty passage text, and the displayed copyright matches
-  the version's attribution.
-- No prompt, code, working directory, or file path appears in provider requests.
-- Exactly one Gloo selection plus one YouVersion passage + one metadata lookup occur.
+- all tests, evaluation thresholds, bundle generation, and smoke tests pass;
+- the sanitized canary reports `gloo-tools`, `youversion-rest`, `copyrightPresent: true`, and `rawPromptTransmitted: false`;
+- the card is labelled `GLOO + YOUVERSION`;
+- passage text, human reference, version, and copyright are non-empty;
+- provider requests contain no raw prompt, code, working directory, transcript, or session hash;
+- spinner sync prints a dry-run patch unless `--apply` is explicitly supplied.
 
-If Gloo output is invalid, Grace degrades to on-device selection (still live
-Scripture). If YouVersion is unreachable, Grace shows a labelled public-domain
-fallback verse. A degraded card is real, but it is not proof of the live path — use
-a card labelled `GLOO + YOUVERSION` for that.
+Gloo tool-capable completions may take tens of seconds on a cold route. The live canary calls the provider directly so a timeout cannot be hidden by the app's graceful fallback.
 
-## 4. Enable grounded selection (optional)
+## 4. Preferences
+
+Environment variables mirror the plugin settings:
+
+```text
+GRACE_LOCALE=en-US
+GRACE_BIBLE_VERSION_ID=3034
+GRACE_TIME_ZONE=Europe/Paris
+GRACE_TRADITION=ecumenical
+GRACE_PREFERRED_TONE=balanced
+GRACE_SHOW_SELECTION_REASON=true
+GRACE_HISTORY_LIMIT=12
+GRACE_CONTEXT_MODE=local-labels
+GRACE_MIN_WAIT_SECONDS=8
+GRACE_COOLDOWN_MINUTES=10
+GRACE_MAX_CARDS_PER_DAY=6
+GRACE_TELEMETRY_ENABLED=false
+```
+
+Tradition values are `ecumenical`, `catholic`, `mainline`, or `evangelical`. Tone values are `balanced`, `calm`, `steady`, `encouraging`, or `reflective`.
+
+Use a valid IANA timezone. It controls local dates, day caps, time windows, church seasons, and observances.
+
+## 5. Local feedback
+
+Every rendered card includes a short Feedback ID:
+
+```powershell
+node dist/cli.js feedback <feedback-id> 1
+node dist/cli.js feedback <feedback-id> 5
+```
+
+The MCP tool is `grace_feedback`. Ratings never contain free text and are never sent to YouVersion. Grace stores only the trace and approved IDs locally, then derives preferred/avoided ID lists for future ranking.
+
+## 6. Grounded Gloo mode (optional)
 
 After publishing a Grace-owned content library:
 
 ```powershell
 $env:GLOO_ENDPOINT_MODE = "grounded"
 $env:GLOO_RAG_PUBLISHER = "GraceInTheGap"
+npm run canary:live
 ```
 
-Repeat the canary and verify citations/routing metadata. The visible reflection
-stays pre-authored even in grounded mode.
+The visible reflection remains catalog-owned. Grounding does not authorize model-authored devotional prose.
 
-## 5. Claude Code visual pass
+## 7. Claude Code visual pass
 
 ```powershell
 claude update
@@ -88,17 +115,30 @@ claude --plugin-dir .
 
 Verify:
 
-- `spinner sync --apply` installs the live, attributed tip and creates a backup.
-- The synced tip is visible while a genuinely long task runs.
-- Claude begins working immediately; the async hook adds no pre-task latency.
-- The full hook card appears on the next conversation turn.
-- `/grace-in-the-gap:moment`, `:privacy`, and `:configure` work.
-- Disabling the plugin produces no hook, MCP process, setting change, or network call.
+- `spinner sync --apply` merges settings and creates a backup;
+- the synced static tip appears during a genuinely long task;
+- Claude starts immediately; the asynchronous hook adds no pre-task latency;
+- the context-selected full card appears on the next conversation turn;
+- the four MCP tools and four namespaced skills work;
+- a low rating changes a future approved choice without storing text;
+- disabling the plugin causes no hook, MCP process, settings change, or network call.
 
-## 6. Cost and launch gates
+Do not describe the asynchronous full card as a dynamic mid-turn spinner. The official spinner override and queued hook card are distinct product surfaces.
 
-- Keep `GRACE_DEMO_ALWAYS=false` outside of recording.
+## 8. Notebook evidence
+
+```powershell
+npm run notebook:build
+```
+
+This regenerates the executed notebook from the current catalog and evaluation. With credentials in private environment variables, the final cell performs a live provider canary and saves only a sanitized summary. Confirm `contains_credentials: false` in notebook metadata before upload.
+
+## 9. Production checklist
+
+- Keep `GRACE_DEMO_ALWAYS=false` outside controlled demonstrations.
 - Keep a nonzero cooldown and daily cap.
-- Review Gloo spend after the first 20 real cards.
-- Obtain formal theology/editorial approval for every visible reflection and locale.
-- Confirm your YouVersion version's attribution requirements are met on screen.
+- Review Gloo cost/latency after initial real usage.
+- Maintain the curated editorial sign-off for every mapping and locale.
+- Confirm YouVersion licenses and on-screen attribution.
+- Measure interruption acceptance and repeat/dismissal behavior with real users.
+- Rotate any credential ever exposed outside approved secret storage.

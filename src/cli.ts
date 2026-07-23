@@ -10,8 +10,9 @@ import {
   installSpinnerSettings
 } from "./installer/spinner-settings.js";
 import { buildManualEvent } from "./privacy/normalize.js";
-import { renderTerminalCard } from "./render.js";
+import { providerLabel, renderTerminalCard } from "./render.js";
 import { createService } from "./service/factory.js";
+import { TelemetryWriter } from "./telemetry.js";
 
 // Load a local .env file for convenience when running the CLI directly, so
 // judges can drop credentials into .env and run without exporting shell vars.
@@ -33,6 +34,7 @@ function usage(): void {
     "",
     "Commands:",
     "  moment [task-type]       Show one live moment (Gloo selection + YouVersion Scripture)",
+    "  feedback <id> <1-5>      Rate a shown moment locally to personalize future choices",
     "  status                   Show non-secret provider, credential, and privacy status",
     "  spinner preview          Print the official Claude Code settings patch",
     "  spinner install --apply  Install static local tips with a settings backup",
@@ -49,14 +51,43 @@ async function runMoment(args: string[]): Promise<void> {
   assertCredentials(config);
   const store = new GraceDataStore(config.dataDirectory);
   const preferences = await store.loadPreferences(config.preferences);
+  const feedback = await store.loadFeedbackContext();
   const { service } = createService({ ...config, preferences });
   const event = buildManualEvent({
     ...(parsedTask?.success ? { taskType: parsedTask.data } : {}),
     locale: preferences.locale,
+    timeZone: preferences.timeZone,
+    tradition: preferences.tradition,
+    preferredTone: preferences.preferredTone,
+    preferredProfileIds: feedback.preferredProfileIds,
+    avoidedProfileIds: feedback.avoidedProfileIds,
+    avoidedPassageIds: feedback.avoidedPassageIds,
     sessionSeed: "cli-manual-moment",
     surface: "mcp"
   });
-  process.stdout.write(renderTerminalCard(await service.create(event)));
+  const moment = await service.create(event);
+  await store.recordPresentedMoment(moment);
+  process.stdout.write(renderTerminalCard(moment));
+}
+
+async function runFeedback(args: string[]): Promise<void> {
+  const momentId = args[1];
+  const rating = Number.parseInt(args[2] ?? "", 10);
+  if (!momentId || !Number.isInteger(rating)) {
+    throw new Error("Usage: feedback <moment-id> <rating 1-5>");
+  }
+  const config = loadConfig();
+  const store = new GraceDataStore(config.dataDirectory);
+  const preferences = await store.loadPreferences(config.preferences);
+  const recorded = await store.recordFeedback(momentId, rating);
+  const telemetry = new TelemetryWriter(preferences.telemetryEnabled, store.telemetryPath);
+  await telemetry.write({
+    event: "feedback",
+    at: new Date().toISOString(),
+    traceId: recorded.traceId,
+    rating: recorded.rating
+  });
+  process.stdout.write("Feedback saved locally. Future selections will reflect it.\n");
 }
 
 async function runStatus(): Promise<void> {
@@ -72,6 +103,10 @@ async function runStatus(): Promise<void> {
     },
     glooEndpointMode: config.gloo.endpointMode,
     enabled: preferences.enabled,
+    locale: preferences.locale,
+    timeZone: preferences.timeZone,
+    tradition: preferences.tradition,
+    preferredTone: preferences.preferredTone,
     contextMode: preferences.contextMode,
     telemetryEnabled: preferences.telemetryEnabled,
     rawPromptStored: false,
@@ -108,10 +143,17 @@ async function runSpinner(args: string[]): Promise<void> {
     assertCredentials(config);
     const store = new GraceDataStore(config.dataDirectory);
     const preferences = await store.loadPreferences(config.preferences);
+    const feedback = await store.loadFeedbackContext();
     const { service } = createService({ ...config, preferences });
     const event = buildManualEvent({
       taskType: "unknown",
       locale: preferences.locale,
+      timeZone: preferences.timeZone,
+      tradition: preferences.tradition,
+      preferredTone: preferences.preferredTone,
+      preferredProfileIds: feedback.preferredProfileIds,
+      avoidedProfileIds: feedback.avoidedProfileIds,
+      avoidedPassageIds: feedback.avoidedPassageIds,
       sessionSeed: `spinner-sync:${new Date().toISOString().slice(0, 10)}`,
       surface: "demo"
     });
@@ -123,7 +165,7 @@ async function runSpinner(args: string[]): Promise<void> {
       return;
     }
     const result = await installSpinnerSettings(settingsPath, dynamicPatch);
-    const source = moment.provenance.live ? "live Gloo + YouVersion" : "offline public-domain fallback";
+    const source = providerLabel(moment);
     process.stdout.write(`Synced one Grace spinner tip (${source}).\n`);
     process.stdout.write(`Settings: ${settingsPath}\n`);
     if (result.backupPath) process.stdout.write(`Backup: ${result.backupPath}\n`);
@@ -142,6 +184,9 @@ async function main(): Promise<void> {
       return;
     case "status":
       await runStatus();
+      return;
+    case "feedback":
+      await runFeedback(args);
       return;
     case "spinner":
       await runSpinner(args);

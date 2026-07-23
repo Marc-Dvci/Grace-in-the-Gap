@@ -2252,8 +2252,8 @@ var Doc = class {
       arg(this, { execution: "async" });
       return;
     }
-    const content = arg;
-    const lines = content.split("\n").filter((x) => x);
+    const content2 = arg;
+    const lines = content2.split("\n").filter((x) => x);
     const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
     const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
     for (const line of dedented) {
@@ -2263,8 +2263,8 @@ var Doc = class {
   compile() {
     const F = Function;
     const args = this?.args;
-    const content = this?.content ?? [``];
-    const lines = [...content.map((x) => `  ${x}`)];
+    const content2 = this?.content ?? [``];
+    const lines = [...content2.map((x) => `  ${x}`)];
     return new F(...args, lines.join("\n"));
   }
 };
@@ -14533,13 +14533,63 @@ var TaskTypeSchema = external_exports.enum([
 var DurationBucketSchema = external_exports.enum(["under-8", "8-15", "16-30", "over-30"]);
 var TimeWindowSchema = external_exports.enum(["morning", "afternoon", "evening", "late-evening"]);
 var ToneSchema = external_exports.enum(["calm", "steady", "encouraging", "reflective"]);
+var WorkflowStageSchema = external_exports.enum([
+  "starting",
+  "retrying",
+  "stuck",
+  "recovering",
+  "completed",
+  "unknown"
+]);
+var OutcomeSchema = external_exports.enum(["failure", "partial", "success", "unknown"]);
+var RepeatBucketSchema = external_exports.enum(["none", "one-two", "three-plus"]);
+var EffortBucketSchema = external_exports.enum(["brief", "sustained", "long-session"]);
+var TraditionSchema = external_exports.enum(["ecumenical", "catholic", "mainline", "evangelical"]);
+var LiturgicalSeasonSchema = external_exports.enum([
+  "advent",
+  "christmas",
+  "epiphany",
+  "lent",
+  "holy-week",
+  "easter",
+  "ordinary"
+]);
+var ObservanceRankSchema = external_exports.enum([
+  "none",
+  "commemoration",
+  "festival",
+  "principal"
+]);
+var CalendarContextSchema = external_exports.object({
+  localDate: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timeZone: external_exports.string().min(1).max(100),
+  season: LiturgicalSeasonSchema,
+  observanceIds: external_exports.array(external_exports.string().min(1).max(80)).max(8),
+  observanceNames: external_exports.array(external_exports.string().min(1).max(160)).max(8),
+  rank: ObservanceRankSchema,
+  lectionaryRefs: external_exports.array(external_exports.string().min(1).max(30)).max(12)
+}).strict();
 var WaitEventSchema = external_exports.object({
   surface: external_exports.enum(["claude-code", "api", "mcp", "demo"]),
   taskType: TaskTypeSchema,
+  taskTypes: external_exports.array(TaskTypeSchema).min(1).max(5),
   estimatedWaitSeconds: external_exports.number().int().min(0).max(600),
   durationBucket: DurationBucketSchema,
   locale: external_exports.string().min(2).max(35),
   timeWindow: TimeWindowSchema,
+  workflowStage: WorkflowStageSchema,
+  lastOutcome: OutcomeSchema,
+  repeatBucket: RepeatBucketSchema,
+  effortBucket: EffortBucketSchema,
+  tradition: TraditionSchema,
+  preferredTone: external_exports.union([ToneSchema, external_exports.literal("balanced")]),
+  calendar: CalendarContextSchema,
+  recentPassageIds: external_exports.array(external_exports.string().min(1).max(30)).max(30),
+  recentSnippetIds: external_exports.array(external_exports.string().min(1).max(100)).max(30),
+  recentProfileIds: external_exports.array(external_exports.string().min(1).max(100)).max(30),
+  preferredProfileIds: external_exports.array(external_exports.string().min(1).max(100)).max(20).default([]),
+  avoidedProfileIds: external_exports.array(external_exports.string().min(1).max(100)).max(20).default([]),
+  avoidedPassageIds: external_exports.array(external_exports.string().min(1).max(30)).max(30).default([]),
   sessionHash: external_exports.string().min(8).max(128),
   contextMode: external_exports.enum(["private", "local-labels"])
 }).strict();
@@ -14551,15 +14601,24 @@ var SelectorDecisionSchema = external_exports.object({
   tone: ToneSchema,
   confidence: external_exports.number().min(0).max(1),
   fallbackVotd: external_exports.boolean(),
-  needsAuth: external_exports.boolean()
+  needsAuth: external_exports.boolean(),
+  reasonCodes: external_exports.array(external_exports.string().regex(/^[a-z0-9-]+$/)).min(1).max(8)
 }).strict();
 var ProfileSchema = external_exports.object({
   id: external_exports.string().min(1),
   task_types: external_exports.array(TaskTypeSchema).min(1),
+  themes: external_exports.array(external_exports.string().min(1).max(60)).min(1),
   tone: ToneSchema,
-  snippet_id: external_exports.string().min(1),
-  passage_hint: external_exports.string().min(1),
+  snippet_ids: external_exports.array(external_exports.string().min(1)).min(1),
+  passage_hints: external_exports.array(external_exports.string().min(1)).min(1),
+  fallback_passage_hint: external_exports.string().min(1),
   time_windows: external_exports.array(TimeWindowSchema).optional(),
+  workflow_stages: external_exports.array(WorkflowStageSchema).optional(),
+  liturgical_seasons: external_exports.array(LiturgicalSeasonSchema).optional(),
+  observance_ids: external_exports.array(external_exports.string().min(1).max(80)).optional(),
+  requires_time_match: external_exports.boolean().default(false),
+  requires_workflow_match: external_exports.boolean().default(false),
+  requires_calendar_match: external_exports.boolean().default(false),
   weight: external_exports.number().positive()
 });
 var SnippetSchema = external_exports.object({
@@ -14567,6 +14626,13 @@ var SnippetSchema = external_exports.object({
   locale: external_exports.string().min(2),
   text: external_exports.string().min(1).max(240),
   status: external_exports.literal("approved-for-demo")
+});
+var PassageHintSchema = external_exports.object({
+  usfm: external_exports.string().regex(/^[1-3]?[A-Z]{2,3}\.[0-9]+(?:\.[0-9]+(?:-[0-9]+)?)?$/),
+  reference: external_exports.string().min(1).max(120),
+  themes: external_exports.array(external_exports.string().min(1).max(60)).min(1),
+  observance_ids: external_exports.array(external_exports.string().min(1).max(80)).optional(),
+  review_status: external_exports.literal("approved-for-demo")
 });
 var PassageSchema = external_exports.object({
   usfm: external_exports.string().min(1),
@@ -14582,6 +14648,7 @@ var CatalogSchema = external_exports.object({
   review_notice: external_exports.string().min(1),
   profiles: external_exports.array(ProfileSchema).min(1),
   snippets: external_exports.array(SnippetSchema).min(1),
+  passage_hints: external_exports.array(PassageHintSchema).min(1),
   // Public-domain (World English Bible) verses bundled only as an offline
   // fallback for when the live YouVersion API is unreachable at runtime.
   offline_passages: external_exports.array(
@@ -14600,6 +14667,11 @@ var PreferencesSchema = external_exports.object({
   enabled: external_exports.boolean().default(true),
   locale: external_exports.string().min(2).max(35).default("en-US"),
   bibleVersionId: external_exports.string().min(1).default("3034"),
+  timeZone: external_exports.string().min(1).max(100).default("UTC"),
+  tradition: TraditionSchema.default("ecumenical"),
+  preferredTone: external_exports.union([ToneSchema, external_exports.literal("balanced")]).default("balanced"),
+  showSelectionReason: external_exports.boolean().default(true),
+  historyLimit: external_exports.number().int().min(3).max(30).default(12),
   minimumWaitSeconds: external_exports.number().int().min(0).max(120).default(8),
   cooldownMinutes: external_exports.number().int().min(0).max(1440).default(10),
   maxCardsPerDay: external_exports.number().int().min(0).max(100).default(6),
@@ -14612,16 +14684,47 @@ var PolicyStateSchema = external_exports.object({
   shownToday: external_exports.number().int().min(0),
   lastShownAt: external_exports.string().datetime().nullable()
 });
+var SessionStateSchema = external_exports.object({
+  sessionHash: external_exports.string().min(8).max(128),
+  updatedAt: external_exports.string().datetime(),
+  turnCount: external_exports.number().int().min(0),
+  repeatedTaskCount: external_exports.number().int().min(0),
+  lastTaskType: TaskTypeSchema.nullable(),
+  recentPassageIds: external_exports.array(external_exports.string().min(1).max(30)).max(30),
+  recentSnippetIds: external_exports.array(external_exports.string().min(1).max(100)).max(30),
+  recentProfileIds: external_exports.array(external_exports.string().min(1).max(100)).max(30)
+}).strict();
+var FeedbackStateSchema = external_exports.object({
+  moments: external_exports.array(external_exports.object({
+    traceId: external_exports.string().uuid(),
+    createdAt: external_exports.string().datetime(),
+    profileId: external_exports.string().min(1).max(100),
+    passageId: external_exports.string().min(1).max(30),
+    snippetId: external_exports.string().min(1).max(100),
+    rating: external_exports.number().int().min(1).max(5).optional()
+  }).strict()).max(100)
+}).strict();
 var MomentExperienceSchema = external_exports.object({
   traceId: external_exports.string().uuid(),
   createdAt: external_exports.string().datetime(),
   durationSeconds: external_exports.number().int().min(3).max(20),
   tone: ToneSchema,
   reflection: external_exports.string().min(1).max(240),
+  reflectionLocale: external_exports.string().min(2).max(35),
   passage: PassageSchema,
+  selection: external_exports.object({
+    profileId: external_exports.string().min(1),
+    snippetId: external_exports.string().min(1),
+    passageId: external_exports.string().min(1),
+    themes: external_exports.array(external_exports.string().min(1).max(60)).min(1),
+    reasonCodes: external_exports.array(external_exports.string().regex(/^[a-z0-9-]+$/)).min(1).max(8),
+    explanationVisible: external_exports.boolean()
+  }).strict(),
   provenance: external_exports.object({
     selector: external_exports.string().min(1),
     scripture: external_exports.string().min(1),
+    selectorLive: external_exports.boolean(),
+    scriptureLive: external_exports.boolean(),
     live: external_exports.boolean(),
     degraded: external_exports.boolean(),
     contentRelease: external_exports.string().min(1),
@@ -14644,6 +14747,13 @@ function integerValue(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
+function hostTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 function loadConfig(env = process.env) {
   const contextSetting = env.GRACE_CONTEXT_MODE || env.CLAUDE_PLUGIN_OPTION_CONTEXT_MODE;
   const contextMode = contextSetting === "private" ? "private" : "local-labels";
@@ -14651,6 +14761,17 @@ function loadConfig(env = process.env) {
     enabled: booleanValue(env.GRACE_ENABLED ?? env.CLAUDE_PLUGIN_OPTION_ENABLED, true),
     locale: env.GRACE_LOCALE || env.CLAUDE_PLUGIN_OPTION_LOCALE || "en-US",
     bibleVersionId: env.GRACE_BIBLE_VERSION_ID || "3034",
+    timeZone: env.GRACE_TIME_ZONE || env.CLAUDE_PLUGIN_OPTION_TIME_ZONE || hostTimeZone(),
+    tradition: env.GRACE_TRADITION || env.CLAUDE_PLUGIN_OPTION_TRADITION || "ecumenical",
+    preferredTone: env.GRACE_PREFERRED_TONE || env.CLAUDE_PLUGIN_OPTION_PREFERRED_TONE || "balanced",
+    showSelectionReason: booleanValue(
+      env.GRACE_SHOW_SELECTION_REASON ?? env.CLAUDE_PLUGIN_OPTION_SHOW_SELECTION_REASON,
+      true
+    ),
+    historyLimit: integerValue(
+      env.GRACE_HISTORY_LIMIT ?? env.CLAUDE_PLUGIN_OPTION_HISTORY_LIMIT,
+      12
+    ),
     minimumWaitSeconds: integerValue(
       env.GRACE_MIN_WAIT_SECONDS ?? env.CLAUDE_PLUGIN_OPTION_MINIMUM_WAIT_SECONDS,
       8
@@ -14678,7 +14799,7 @@ function loadConfig(env = process.env) {
       clientSecret: env.GLOO_CLIENT_SECRET || env.CLAUDE_PLUGIN_OPTION_GLOO_CLIENT_SECRET || "",
       baseUrl: (env.GLOO_BASE_URL || "https://platform.ai.gloo.com").replace(/\/$/, ""),
       model: env.GLOO_MODEL || "gloo-openai-gpt-5-mini",
-      endpointMode: (env.GLOO_ENDPOINT_MODE || env.CLAUDE_PLUGIN_OPTION_GLOO_ENDPOINT_MODE) === "grounded" ? "grounded" : "responses",
+      endpointMode: (env.GLOO_ENDPOINT_MODE || env.CLAUDE_PLUGIN_OPTION_GLOO_ENDPOINT_MODE) === "grounded" ? "grounded" : "tools",
       ragPublisher: env.GLOO_RAG_PUBLISHER || env.CLAUDE_PLUGIN_OPTION_GLOO_RAG_PUBLISHER || "",
       tradition: env.GLOO_TRADITION || ""
     },
@@ -14699,8 +14820,323 @@ var MISSING_CREDENTIALS_MESSAGE = [
 ].join("\n");
 
 // src/data/store.ts
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+
+// src/calendar/liturgical.ts
+var FIXED_OBSERVANCES = [
+  {
+    id: "epiphany",
+    name: "The Epiphany of the Lord",
+    month: 1,
+    day: 6,
+    rank: "principal",
+    lectionaryRefs: ["MAT.2.10-11"]
+  },
+  {
+    id: "presentation",
+    name: "The Presentation of Christ",
+    month: 2,
+    day: 2,
+    rank: "festival",
+    lectionaryRefs: ["LUK.2.29-32"]
+  },
+  {
+    id: "annunciation",
+    name: "The Annunciation",
+    month: 3,
+    day: 25,
+    rank: "festival",
+    lectionaryRefs: ["LUK.1.30-33"]
+  },
+  {
+    id: "nativity-john-baptist",
+    name: "The Nativity of John the Baptist",
+    month: 6,
+    day: 24,
+    rank: "festival",
+    lectionaryRefs: ["LUK.1.76-79"]
+  },
+  {
+    id: "peter-and-paul",
+    name: "Peter and Paul, Apostles",
+    month: 6,
+    day: 29,
+    rank: "festival",
+    lectionaryRefs: ["MAT.16.15-18"]
+  },
+  {
+    id: "mary-magdalene",
+    name: "Mary Magdalene",
+    month: 7,
+    day: 22,
+    rank: "festival",
+    lectionaryRefs: ["JHN.20.16-18"]
+  },
+  {
+    id: "bridget-of-sweden",
+    name: "Bridget of Sweden",
+    month: 7,
+    day: 23,
+    rank: "commemoration",
+    traditions: ["catholic", "mainline"],
+    lectionaryRefs: ["JHN.15.4-5"]
+  },
+  {
+    id: "james-apostle",
+    name: "James the Apostle",
+    month: 7,
+    day: 25,
+    rank: "festival",
+    lectionaryRefs: ["MAT.20.26-28"]
+  },
+  {
+    id: "martha-mary-lazarus",
+    name: "Martha, Mary and Lazarus",
+    month: 7,
+    day: 29,
+    rank: "commemoration",
+    traditions: ["catholic"],
+    lectionaryRefs: ["JHN.11.25-27"]
+  },
+  {
+    id: "transfiguration",
+    name: "The Transfiguration of the Lord",
+    month: 8,
+    day: 6,
+    rank: "festival",
+    lectionaryRefs: ["LUK.9.34-36"]
+  },
+  {
+    id: "assumption",
+    name: "The Assumption of Mary",
+    month: 8,
+    day: 15,
+    rank: "principal",
+    traditions: ["catholic"],
+    lectionaryRefs: ["LUK.1.46-49"]
+  },
+  {
+    id: "holy-cross",
+    name: "Holy Cross Day",
+    month: 9,
+    day: 14,
+    rank: "festival",
+    lectionaryRefs: ["JHN.3.16-17"]
+  },
+  {
+    id: "all-saints",
+    name: "All Saints' Day",
+    month: 11,
+    day: 1,
+    rank: "principal",
+    lectionaryRefs: ["MAT.5.8-10"]
+  },
+  {
+    id: "all-souls",
+    name: "Commemoration of the Faithful Departed",
+    month: 11,
+    day: 2,
+    rank: "commemoration",
+    traditions: ["catholic", "mainline"],
+    lectionaryRefs: ["JHN.6.37-40"]
+  },
+  {
+    id: "christmas",
+    name: "Christmas Day",
+    month: 12,
+    day: 25,
+    rank: "principal",
+    lectionaryRefs: ["LUK.2.10-14"]
+  },
+  {
+    id: "stephen",
+    name: "Stephen, Deacon and Martyr",
+    month: 12,
+    day: 26,
+    rank: "festival",
+    lectionaryRefs: ["ACT.7.59-60"]
+  },
+  {
+    id: "john-apostle",
+    name: "John, Apostle and Evangelist",
+    month: 12,
+    day: 27,
+    rank: "festival",
+    lectionaryRefs: ["JHN.21.22-24"]
+  }
+];
+var RANK_ORDER = {
+  none: 0,
+  commemoration: 1,
+  festival: 2,
+  principal: 3
+};
+function isoDate(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function dateFromIso(value) {
+  return /* @__PURE__ */ new Date(`${value}T12:00:00.000Z`);
+}
+function addDays(value, days) {
+  const date5 = dateFromIso(value);
+  date5.setUTCDate(date5.getUTCDate() + days);
+  return isoDate(date5.getUTCFullYear(), date5.getUTCMonth() + 1, date5.getUTCDate());
+}
+function sundayOnOrAfter(year, month, day) {
+  const value = new Date(Date.UTC(year, month - 1, day, 12));
+  const offset = (7 - value.getUTCDay()) % 7;
+  return addDays(isoDate(year, month, day), offset);
+}
+function gregorianEasterDate(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = (h + l - 7 * m + 114) % 31 + 1;
+  return isoDate(year, month, day);
+}
+function localDateAt(date5, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date5).map((part) => [part.type, part.value])
+  );
+  return `${parts.year ?? "1970"}-${parts.month ?? "01"}-${parts.day ?? "01"}`;
+}
+function timeWindowAt(date5, timeZone) {
+  const hourPart = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date5).find((part) => part.type === "hour")?.value;
+  const hour = Number.parseInt(hourPart ?? "12", 10);
+  if (hour < 5 || hour >= 22) return "late-evening";
+  if (hour < 12) return "morning";
+  if (hour < 18) return "afternoon";
+  return "evening";
+}
+function seasonFor(localDate) {
+  const year = Number.parseInt(localDate.slice(0, 4), 10);
+  const easter = gregorianEasterDate(year);
+  const ashWednesday = addDays(easter, -46);
+  const palmSunday = addDays(easter, -7);
+  const pentecost = addDays(easter, 49);
+  const advent = sundayOnOrAfter(year, 11, 27);
+  if (localDate >= advent && localDate < isoDate(year, 12, 25)) return "advent";
+  if (localDate >= isoDate(year, 12, 25) || localDate <= isoDate(year, 1, 5)) return "christmas";
+  if (localDate >= palmSunday && localDate < easter) return "holy-week";
+  if (localDate >= ashWednesday && localDate < palmSunday) return "lent";
+  if (localDate >= easter && localDate <= pentecost) return "easter";
+  if (localDate >= isoDate(year, 1, 6) && localDate < ashWednesday) return "epiphany";
+  return "ordinary";
+}
+function movableObservances(year) {
+  const easter = gregorianEasterDate(year);
+  return [
+    {
+      id: "ash-wednesday",
+      name: "Ash Wednesday",
+      date: addDays(easter, -46),
+      rank: "principal",
+      lectionaryRefs: ["MAT.6.3-6"]
+    },
+    {
+      id: "palm-sunday",
+      name: "Palm Sunday",
+      date: addDays(easter, -7),
+      rank: "principal",
+      lectionaryRefs: ["MAT.21.8-11"]
+    },
+    {
+      id: "maundy-thursday",
+      name: "Maundy Thursday",
+      date: addDays(easter, -3),
+      rank: "principal",
+      lectionaryRefs: ["JHN.13.12-15"]
+    },
+    {
+      id: "good-friday",
+      name: "Good Friday",
+      date: addDays(easter, -2),
+      rank: "principal",
+      lectionaryRefs: ["JHN.19.28-30"]
+    },
+    {
+      id: "easter-day",
+      name: "Easter Day",
+      date: easter,
+      rank: "principal",
+      lectionaryRefs: ["JHN.20.16-18"]
+    },
+    {
+      id: "ascension",
+      name: "The Ascension of the Lord",
+      date: addDays(easter, 39),
+      rank: "principal",
+      lectionaryRefs: ["ACT.1.9-11"]
+    },
+    {
+      id: "pentecost",
+      name: "Pentecost",
+      date: addDays(easter, 49),
+      rank: "principal",
+      lectionaryRefs: ["ACT.2.1-4"]
+    },
+    {
+      id: "trinity-sunday",
+      name: "Trinity Sunday",
+      date: addDays(easter, 56),
+      rank: "principal",
+      traditions: ["catholic", "mainline"],
+      lectionaryRefs: ["MAT.28.18-20"]
+    }
+  ];
+}
+function resolveLiturgicalCalendar(options) {
+  const localDate = localDateAt(options.now, options.timeZone);
+  const year = Number.parseInt(localDate.slice(0, 4), 10);
+  const month = Number.parseInt(localDate.slice(5, 7), 10);
+  const day = Number.parseInt(localDate.slice(8, 10), 10);
+  const fixed = FIXED_OBSERVANCES.filter((item) => {
+    return item.month === month && item.day === day && (!item.traditions || item.traditions.includes(options.tradition));
+  });
+  const movable = movableObservances(year).filter((item) => {
+    return item.date === localDate && (!item.traditions || item.traditions.includes(options.tradition));
+  });
+  const observances = [...fixed, ...movable].sort((left, right) => {
+    return RANK_ORDER[right.rank] - RANK_ORDER[left.rank];
+  });
+  const rank = observances[0]?.rank ?? "none";
+  return CalendarContextSchema.parse({
+    localDate,
+    timeZone: options.timeZone,
+    season: seasonFor(localDate),
+    observanceIds: observances.map((item) => item.id),
+    observanceNames: observances.map((item) => item.name),
+    rank,
+    lectionaryRefs: [...new Set(observances.flatMap((item) => item.lectionaryRefs))]
+  });
+}
+
+// src/data/store.ts
+var SessionFileSchema = external_exports.object({
+  sessions: external_exports.array(SessionStateSchema).max(50)
+}).strict();
 async function readJson(path) {
   try {
     return JSON.parse(await readFile(path, "utf8"));
@@ -14722,11 +15158,17 @@ var GraceDataStore = class {
     this.directory = directory;
     this.preferencesPath = join(directory, "preferences.json");
     this.policyPath = join(directory, "policy-state.json");
+    this.sessionsPath = join(directory, "session-state.json");
+    this.installationSaltPath = join(directory, "installation-salt");
+    this.feedbackPath = join(directory, "feedback-state.json");
     this.telemetryPath = join(directory, "telemetry.jsonl");
   }
   directory;
   preferencesPath;
   policyPath;
+  sessionsPath;
+  installationSaltPath;
+  feedbackPath;
   telemetryPath;
   async loadPreferences(defaults) {
     const stored = await readJson(this.preferencesPath);
@@ -14736,8 +15178,8 @@ var GraceDataStore = class {
   async savePreferences(preferences) {
     await writeJsonAtomically(this.preferencesPath, PreferencesSchema.parse(preferences));
   }
-  async loadPolicyState(now) {
-    const today = now.toISOString().slice(0, 10);
+  async loadPolicyState(now, timeZone = "UTC") {
+    const today = localDateAt(now, timeZone);
     const stored = PolicyStateSchema.safeParse(await readJson(this.policyPath));
     if (!stored.success || stored.data.date !== today) {
       return { date: today, shownToday: 0, lastShownAt: null };
@@ -14746,6 +15188,157 @@ var GraceDataStore = class {
   }
   async savePolicyState(state) {
     await writeJsonAtomically(this.policyPath, PolicyStateSchema.parse(state));
+  }
+  async installationSalt() {
+    try {
+      const existing = (await readFile(this.installationSaltPath, "utf8")).trim();
+      if (existing.length >= 32) return existing;
+    } catch (error51) {
+      const code = error51 instanceof Error && "code" in error51 ? error51.code : void 0;
+      if (code !== "ENOENT") throw error51;
+    }
+    await mkdir(dirname(this.installationSaltPath), { recursive: true });
+    const generated = randomBytes(32).toString("hex");
+    try {
+      await writeFile(this.installationSaltPath, generated, {
+        encoding: "utf8",
+        mode: 384,
+        flag: "wx"
+      });
+      return generated;
+    } catch (error51) {
+      const code = error51 instanceof Error && "code" in error51 ? error51.code : void 0;
+      if (code !== "EEXIST") throw error51;
+      return (await readFile(this.installationSaltPath, "utf8")).trim();
+    }
+  }
+  async loadSessionState(sessionHash, now) {
+    const parsed = SessionFileSchema.safeParse(await readJson(this.sessionsPath));
+    const existing = parsed.success ? parsed.data.sessions.find((session) => session.sessionHash === sessionHash) : void 0;
+    return existing ?? {
+      sessionHash,
+      updatedAt: now.toISOString(),
+      turnCount: 0,
+      repeatedTaskCount: 0,
+      lastTaskType: null,
+      recentPassageIds: [],
+      recentSnippetIds: [],
+      recentProfileIds: []
+    };
+  }
+  async recordSessionTurn(options) {
+    const parsed = SessionFileSchema.safeParse(await readJson(this.sessionsPath));
+    const sessions = parsed.success ? [...parsed.data.sessions] : [];
+    const next = SessionStateSchema.parse({
+      ...options.previous,
+      updatedAt: options.now.toISOString(),
+      turnCount: options.previous.turnCount + 1,
+      repeatedTaskCount: options.previous.lastTaskType === options.taskType ? options.previous.repeatedTaskCount + 1 : 0,
+      lastTaskType: options.taskType
+    });
+    const retained = sessions.filter((session) => session.sessionHash !== next.sessionHash).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 19);
+    await writeJsonAtomically(this.sessionsPath, { sessions: [next, ...retained] });
+    return next;
+  }
+  async recordSessionMoment(options) {
+    const parsed = SessionFileSchema.safeParse(await readJson(this.sessionsPath));
+    const sessions = parsed.success ? [...parsed.data.sessions] : [];
+    const limit = options.historyLimit;
+    const prependUnique = (value, values) => {
+      return [value, ...values.filter((item) => item !== value)].slice(0, limit);
+    };
+    const next = SessionStateSchema.parse({
+      sessionHash: options.previous.sessionHash,
+      updatedAt: options.now.toISOString(),
+      turnCount: options.previous.turnCount + 1,
+      repeatedTaskCount: options.previous.lastTaskType === options.taskType ? options.previous.repeatedTaskCount + 1 : 0,
+      lastTaskType: options.taskType,
+      recentPassageIds: prependUnique(
+        options.moment.selection.passageId,
+        options.previous.recentPassageIds
+      ),
+      recentSnippetIds: prependUnique(
+        options.moment.selection.snippetId,
+        options.previous.recentSnippetIds
+      ),
+      recentProfileIds: prependUnique(
+        options.moment.selection.profileId,
+        options.previous.recentProfileIds
+      )
+    });
+    const retained = sessions.filter((session) => session.sessionHash !== next.sessionHash).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 19);
+    await writeJsonAtomically(this.sessionsPath, { sessions: [next, ...retained] });
+    return next;
+  }
+  async recordPresentedMoment(moment) {
+    const parsed = FeedbackStateSchema.safeParse(await readJson(this.feedbackPath));
+    const moments = parsed.success ? parsed.data.moments : [];
+    const existing = moments.find((item) => item.traceId === moment.traceId);
+    const current = {
+      traceId: moment.traceId,
+      createdAt: moment.createdAt,
+      profileId: moment.selection.profileId,
+      passageId: moment.selection.passageId,
+      snippetId: moment.selection.snippetId,
+      ...existing?.rating ? { rating: existing.rating } : {}
+    };
+    await writeJsonAtomically(this.feedbackPath, {
+      moments: [
+        current,
+        ...moments.filter((item) => item.traceId !== moment.traceId)
+      ].slice(0, 100)
+    });
+  }
+  async recordFeedback(momentId, rating) {
+    if (!/^[0-9a-f-]{8,36}$/i.test(momentId)) {
+      throw new Error("Moment ID must be the 8-character card ID or a full trace ID");
+    }
+    const parsed = FeedbackStateSchema.safeParse(await readJson(this.feedbackPath));
+    if (!parsed.success) throw new Error("No locally recorded Grace moments are available");
+    const matches = parsed.data.moments.filter((item) => {
+      return item.traceId === momentId || item.traceId.startsWith(momentId);
+    });
+    if (matches.length !== 1) {
+      throw new Error(matches.length === 0 ? "Moment ID was not found locally" : "Moment ID is ambiguous");
+    }
+    const matched = matches[0];
+    const safeRating = external_exports.number().int().min(1).max(5).parse(rating);
+    const moments = parsed.data.moments.map((item) => {
+      return item.traceId === matched.traceId ? { ...item, rating: safeRating } : item;
+    });
+    await writeJsonAtomically(this.feedbackPath, { moments });
+    return {
+      traceId: matched.traceId,
+      profileId: matched.profileId,
+      passageId: matched.passageId,
+      rating: safeRating
+    };
+  }
+  async loadFeedbackContext() {
+    const parsed = FeedbackStateSchema.safeParse(await readJson(this.feedbackPath));
+    if (!parsed.success) {
+      return { preferredProfileIds: [], avoidedProfileIds: [], avoidedPassageIds: [] };
+    }
+    const averages = (key) => {
+      const values = /* @__PURE__ */ new Map();
+      for (const moment of parsed.data.moments) {
+        if (!moment.rating) continue;
+        const ratings = values.get(moment[key]) ?? [];
+        ratings.push(moment.rating);
+        values.set(moment[key], ratings);
+      }
+      return [...values.entries()].map(([id, ratings]) => ({
+        id,
+        average: ratings.reduce((sum, value) => sum + value, 0) / ratings.length
+      }));
+    };
+    const profiles = averages("profileId");
+    const passages = averages("passageId");
+    return {
+      preferredProfileIds: profiles.filter((item) => item.average >= 4).map((item) => item.id).slice(0, 20),
+      avoidedProfileIds: profiles.filter((item) => item.average <= 2).map((item) => item.id).slice(0, 20),
+      avoidedPassageIds: passages.filter((item) => item.average <= 2).map((item) => item.id).slice(0, 30)
+    };
   }
 };
 
@@ -14769,14 +15362,16 @@ function evaluatePolicy(event, preferences, state, now) {
 }
 function recordShown(state, now) {
   return {
-    date: now.toISOString().slice(0, 10),
+    // `loadPolicyState` already resolved this date in the user's IANA time
+    // zone. Keeping it avoids a UTC/local rollover mismatch around midnight.
+    date: state.date,
     shownToday: state.shownToday + 1,
     lastShownAt: now.toISOString()
   };
 }
 
 // src/privacy/normalize.ts
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 var ClaudeHookInputSchema = external_exports.object({
   session_id: external_exports.string().min(1),
   transcript_path: external_exports.string().optional(),
@@ -14786,18 +15381,49 @@ var ClaudeHookInputSchema = external_exports.object({
   prompt: external_exports.string()
 });
 var TASK_PATTERNS = [
-  ["debugging", /\b(debug|bug|fix|error|exception|failing|crash|broken|root cause)\b/i],
-  ["testing", /\b(test|tests|vitest|pytest|jest|coverage|benchmark|lint|typecheck)\b/i],
-  ["refactor", /\b(refactor|migrate|rewrite|modernize|clean up|optimi[sz]e)\b/i],
-  ["review", /\b(review|audit|inspect|security|critique|check my)\b/i],
-  ["planning", /\b(plan|design|architect|roadmap|strategy|specification)\b/i],
-  ["implementation", /\b(build|implement|create|add|develop|code|ship|scaffold)\b/i],
-  ["analysis", /\b(analy[sz]e|explain|investigate|research|compare|understand)\b/i],
-  ["generation", /\b(write|generate|draft|produce)\b/i]
+  ["debugging", /\b(debug|bug|fix|error|exception|failing|crash|broken|root cause|corriger|erreur|échec|plantage)\b/i],
+  ["testing", /\b(test|tests|vitest|pytest|jest|coverage|benchmark|lint|typecheck|tester|tests?|couverture)\b/i],
+  ["refactor", /\b(refactor|migrate|rewrite|modernize|clean up|optimi[sz]e|refactoriser|migrer|réécrire|optimiser)\b/i],
+  ["review", /\b(review|audit|inspect|security|critique|check my|réviser|auditer|inspecter|sécurité)\b/i],
+  ["planning", /\b(plan|design|architect|roadmap|strategy|specification|planifier|concevoir|architecture|stratégie)\b/i],
+  ["implementation", /\b(build|implement|create|add|develop|code|ship|scaffold|construire|implémenter|créer|ajouter|développer)\b/i],
+  ["analysis", /\b(analy[sz]e|explain|investigate|research|compare|understand|analyser|expliquer|rechercher|comparer|comprendre)\b/i],
+  ["generation", /\b(write|generate|draft|produce|écrire|générer|rédiger|produire)\b/i]
 ];
-function classifyTask(prompt) {
+function classifyTaskTypes(prompt) {
+  const matches = [];
   for (const [taskType, pattern] of TASK_PATTERNS) {
-    if (pattern.test(prompt)) return TaskTypeSchema.parse(taskType);
+    if (pattern.test(prompt)) matches.push(TaskTypeSchema.parse(taskType));
+  }
+  return matches.length > 0 ? matches.slice(0, 5) : ["unknown"];
+}
+function workflowStage(prompt) {
+  if (/\b(done|completed|fixed|resolved|passing now|works now|terminé|corrigé|résolu|fonctionne maintenant)\b/i.test(prompt)) {
+    return "completed";
+  }
+  if (/\b(recover|restore|roll back|regression|récupérer|restaurer|régression)\b/i.test(prompt)) {
+    return "recovering";
+  }
+  if (/\b(stuck|blocked|cannot figure|can't figure|keeps failing|still failing|again and again|bloqué|n'arrive pas|échoue encore)\b/i.test(prompt)) {
+    return "stuck";
+  }
+  if (/\b(retry|try again|rerun|again|second attempt|third attempt|réessayer|relancer|encore)\b/i.test(prompt)) {
+    return "retrying";
+  }
+  if (/\b(start|begin|new project|from scratch|commencer|nouveau projet|de zéro)\b/i.test(prompt)) {
+    return "starting";
+  }
+  return "unknown";
+}
+function outcome(prompt) {
+  if (/\b(passed|succeeded|fixed|resolved|working now|réussi|corrigé|résolu)\b/i.test(prompt)) {
+    return "success";
+  }
+  if (/\b(partial|partly|some tests|incomplet|partiel|certains tests)\b/i.test(prompt)) {
+    return "partial";
+  }
+  if (/\b(fail|failing|failed|error|crash|broken|échec|échoue|erreur|plantage|cassé)\b/i.test(prompt)) {
+    return "failure";
   }
   return "unknown";
 }
@@ -14824,25 +15450,58 @@ function durationBucket(seconds) {
   if (seconds <= 30) return "16-30";
   return "over-30";
 }
-function timeWindow(date5) {
-  const hour = date5.getHours();
-  if (hour < 5 || hour >= 22) return "late-evening";
-  if (hour < 12) return "morning";
-  if (hour < 18) return "afternoon";
-  return "evening";
+function effortBucket(waitSeconds, sessionState) {
+  if (waitSeconds >= 30 || (sessionState?.turnCount ?? 0) >= 8) return "long-session";
+  if (waitSeconds >= 12 || (sessionState?.turnCount ?? 0) >= 3) return "sustained";
+  return "brief";
+}
+function repeatBucket(explicitStage, sessionState, primaryTask) {
+  const repeated = sessionState?.lastTaskType === primaryTask ? sessionState.repeatedTaskCount + 1 : 0;
+  if (explicitStage === "stuck" || repeated >= 3) return "three-plus";
+  if (explicitStage === "retrying" || repeated >= 1) return "one-two";
+  return "none";
+}
+function hashSessionId(sessionId, salt) {
+  if (salt) {
+    return createHmac("sha256", salt).update(sessionId).digest("hex").slice(0, 24);
+  }
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
 }
 function normalizeClaudeHook(input, options) {
   const hook = ClaudeHookInputSchema.parse(input);
-  const taskType = options.contextMode === "private" ? "unknown" : classifyTask(hook.prompt);
+  const taskTypes = options.contextMode === "private" ? ["unknown"] : classifyTaskTypes(hook.prompt);
+  const taskType = taskTypes[0] ?? "unknown";
   const estimatedWaitSeconds = estimateWaitSeconds(hook.prompt, taskType);
+  const now = options.now ?? /* @__PURE__ */ new Date();
+  const stage = options.contextMode === "private" ? "unknown" : workflowStage(hook.prompt);
+  const lastOutcome = options.contextMode === "private" ? "unknown" : outcome(hook.prompt);
+  const calendar = resolveLiturgicalCalendar({
+    now,
+    timeZone: options.timeZone,
+    tradition: options.tradition
+  });
   const event = {
     surface: "claude-code",
     taskType,
+    taskTypes,
     estimatedWaitSeconds,
     durationBucket: DurationBucketSchema.parse(durationBucket(estimatedWaitSeconds)),
     locale: options.locale,
-    timeWindow: TimeWindowSchema.parse(timeWindow(options.now ?? /* @__PURE__ */ new Date())),
-    sessionHash: createHash("sha256").update(hook.session_id).digest("hex").slice(0, 24),
+    timeWindow: timeWindowAt(now, options.timeZone),
+    workflowStage: WorkflowStageSchema.parse(stage),
+    lastOutcome: OutcomeSchema.parse(lastOutcome),
+    repeatBucket: RepeatBucketSchema.parse(repeatBucket(stage, options.sessionState, taskType)),
+    effortBucket: EffortBucketSchema.parse(effortBucket(estimatedWaitSeconds, options.sessionState)),
+    tradition: options.tradition,
+    preferredTone: options.preferredTone,
+    calendar,
+    recentPassageIds: options.sessionState?.recentPassageIds ?? [],
+    recentSnippetIds: options.sessionState?.recentSnippetIds ?? [],
+    recentProfileIds: options.sessionState?.recentProfileIds ?? [],
+    preferredProfileIds: options.feedback?.preferredProfileIds ?? [],
+    avoidedProfileIds: options.feedback?.avoidedProfileIds ?? [],
+    avoidedPassageIds: options.feedback?.avoidedPassageIds ?? [],
+    sessionHash: hashSessionId(hook.session_id, options.sessionSalt),
     contextMode: options.contextMode
   };
   return WaitEventSchema.parse(event);
@@ -14850,7 +15509,14 @@ function normalizeClaudeHook(input, options) {
 
 // src/render.ts
 function wrap(text, width) {
-  const words = text.split(/\s+/).filter(Boolean);
+  const words = text.split(/\s+/).filter(Boolean).flatMap((word) => {
+    if (word.length <= width) return [word];
+    const chunks = [];
+    for (let index = 0; index < word.length; index += width) {
+      chunks.push(word.slice(index, index + width));
+    }
+    return chunks;
+  });
   const lines = [];
   let line = "";
   for (const word of words) {
@@ -14866,143 +15532,388 @@ function wrap(text, width) {
   if (line) lines.push(line);
   return lines;
 }
+function providerLabel(moment) {
+  if (moment.provenance.selectorLive && moment.provenance.scriptureLive) {
+    return "GLOO + YOUVERSION";
+  }
+  if (moment.provenance.scriptureLive) return "LOCAL SELECTOR + YOUVERSION";
+  if (moment.provenance.selectorLive) return "GLOO + PUBLIC DOMAIN";
+  return "LOCAL + PUBLIC DOMAIN";
+}
+function reasonLabel(code) {
+  return code.replace(/^task-/, "").replace(/^workflow-/, "").replace(/^calendar-/, "").replace(/^season-/, "").replace(/^time-/, "").replaceAll("-", " ");
+}
 function renderHookCard(moment) {
   const width = 68;
-  const source = moment.provenance.live ? "GLOO + YOUVERSION" : "OFFLINE FALLBACK \xB7 PUBLIC DOMAIN";
   const rows = [
-    `Grace in the Gap \xB7 ${moment.durationSeconds}s pause \xB7 ${source}`,
+    ...wrap(`Grace in the Gap \xB7 ${moment.durationSeconds}s pause \xB7 ${providerLabel(moment)}`, width),
     "",
     ...wrap(`\u201C${moment.passage.text}\u201D`, width - 4),
-    `${moment.passage.reference} \xB7 ${moment.passage.versionName}`,
+    ...wrap(`${moment.passage.reference} \xB7 ${moment.passage.versionName}`, width),
     "",
     ...wrap(moment.reflection, width - 4),
-    `Attribution: ${moment.passage.copyright}`,
-    "Privacy: raw prompt is neither stored nor transmitted."
+    ...wrap(`Attribution: ${moment.passage.copyright}`, width),
+    ...wrap("Privacy: raw prompt is neither stored nor transmitted.", width)
   ];
+  if (moment.selection.explanationVisible) {
+    const reasons = moment.selection.reasonCodes.slice(0, 3).map(reasonLabel).join(" \xB7 ");
+    rows.push(...wrap(`Why this moment: ${reasons}`, width));
+  }
+  if (!moment.provenance.scriptureLive) {
+    rows.push(...wrap("Fallback: bundled World English Bible text (public domain).", width));
+  }
+  rows.push(...wrap(`Feedback ID: ${moment.traceId.slice(0, 8)} (rate 1-5 locally)`, width));
   return rows.join("\n");
 }
 
 // content/catalog.json
 var catalog_default = {
-  release: "2026.07-demo.1",
-  review_notice: "Conservative demo copy. A qualified theology/editorial reviewer must approve this release before public launch.",
-  offline_passages_notice: "Public-domain World English Bible verses, used only as an offline fallback when the live YouVersion API is unreachable.",
+  release: "2026.07-demo.2",
+  review_notice: "Expanded conservative demo copy and mappings. A qualified theology/editorial reviewer must approve this release before public launch.",
+  offline_passages_notice: "Public-domain World English Bible verses, used only as a labelled fallback when the live YouVersion API is unreachable.",
   profiles: [
     {
       id: "quiet-trust",
       task_types: ["generation", "analysis", "unknown"],
+      themes: ["stillness", "trust"],
       tone: "calm",
-      snippet_id: "pause-and-release",
-      passage_hint: "PSA.46.10",
+      snippet_ids: ["pause-and-release", "quiet-with-trust"],
+      passage_hints: ["PSA.46.10", "PSA.37.5", "ISA.30.15"],
+      fallback_passage_hint: "PSA.46.10",
       weight: 1
     },
     {
       id: "purposeful-work",
-      task_types: ["implementation", "refactor"],
+      task_types: ["implementation", "refactor", "planning"],
+      themes: ["purpose", "faithful-work"],
       tone: "steady",
-      snippet_id: "work-with-purpose",
-      passage_hint: "COL.3.23",
+      snippet_ids: ["work-with-purpose", "faithful-next-step"],
+      passage_hints: ["COL.3.23", "PSA.90.17", "1CO.10.31"],
+      fallback_passage_hint: "COL.3.23",
       weight: 1
     },
     {
       id: "wisdom-in-debugging",
-      task_types: ["debugging"],
+      task_types: ["debugging", "analysis", "review"],
+      themes: ["wisdom", "discernment"],
       tone: "reflective",
-      snippet_id: "make-room-for-wisdom",
-      passage_hint: "JAS.1.5",
+      snippet_ids: ["make-room-for-wisdom", "look-again-with-wisdom"],
+      passage_hints: ["JAS.1.5", "PRO.2.6", "PRO.3.5-6"],
+      fallback_passage_hint: "JAS.1.5",
       weight: 1
     },
     {
       id: "patient-in-testing",
-      task_types: ["testing"],
+      task_types: ["testing", "debugging"],
+      themes: ["hope", "patience"],
       tone: "encouraging",
-      snippet_id: "hope-while-it-runs",
-      passage_hint: "ROM.12.12",
+      snippet_ids: ["hope-while-it-runs", "steady-in-the-delay"],
+      passage_hints: ["ROM.12.12", "GAL.6.9", "JAS.1.2-4"],
+      fallback_passage_hint: "ROM.12.12",
       weight: 1
     },
     {
       id: "committed-plans",
-      task_types: ["planning"],
+      task_types: ["planning", "implementation"],
+      themes: ["planning", "surrender"],
       tone: "steady",
-      snippet_id: "hold-the-plan-lightly",
-      passage_hint: "PRO.16.3",
+      snippet_ids: ["hold-the-plan-lightly", "plans-with-open-hands"],
+      passage_hints: ["PRO.16.3", "JAS.4.13-15", "PSA.127.1"],
+      fallback_passage_hint: "PRO.16.3",
       weight: 1
     },
     {
       id: "thoughtful-review",
-      task_types: ["review"],
+      task_types: ["review", "analysis"],
+      themes: ["discernment", "care"],
       tone: "reflective",
-      snippet_id: "notice-what-is-good",
-      passage_hint: "PHP.4.8",
+      snippet_ids: ["notice-what-is-good", "listen-before-judging"],
+      passage_hints: ["PHP.4.8", "1TH.5.21", "PRO.18.13"],
+      fallback_passage_hint: "PHP.4.8",
       weight: 1
     },
     {
       id: "rest-for-late-work",
       task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["rest", "worth"],
       tone: "calm",
-      snippet_id: "you-can-rest",
-      passage_hint: "MAT.11.28",
+      snippet_ids: ["you-can-rest", "enough-for-today"],
+      passage_hints: ["MAT.11.28", "PSA.4.8", "PSA.127.2"],
+      fallback_passage_hint: "MAT.11.28",
       time_windows: ["late-evening"],
+      requires_time_match: true,
       weight: 1.25
     },
     {
       id: "care-in-uncertainty",
       task_types: ["debugging", "analysis", "unknown"],
+      themes: ["care", "uncertainty"],
       tone: "encouraging",
-      snippet_id: "set-down-the-worry",
-      passage_hint: "1PE.5.7",
+      snippet_ids: ["set-down-the-worry", "uncertainty-is-not-solitude"],
+      passage_hints: ["1PE.5.7", "PHP.4.6-7", "PSA.55.22"],
+      fallback_passage_hint: "1PE.5.7",
+      weight: 0.9
+    },
+    {
+      id: "perseverance-in-retrying",
+      task_types: ["debugging", "testing", "implementation", "refactor"],
+      themes: ["perseverance", "hope"],
+      tone: "encouraging",
+      snippet_ids: ["one-faithful-step", "patience-in-retrying"],
+      passage_hints: ["GAL.6.9", "HEB.12.1-2", "ROM.5.3-4", "ROM.12.12"],
+      fallback_passage_hint: "ROM.12.12",
+      workflow_stages: ["retrying", "stuck"],
+      requires_workflow_match: true,
+      weight: 1.2
+    },
+    {
+      id: "gratitude-after-progress",
+      task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["gratitude", "completion"],
+      tone: "reflective",
+      snippet_ids: ["receive-the-progress", "gratitude-before-next"],
+      passage_hints: ["1TH.5.18", "PSA.126.3", "PSA.92.1-2"],
+      fallback_passage_hint: "PSA.126.3",
+      workflow_stages: ["recovering", "completed"],
+      requires_workflow_match: true,
+      weight: 1.1
+    },
+    {
+      id: "work-in-community",
+      task_types: ["implementation", "planning", "review", "refactor"],
+      themes: ["community", "counsel"],
+      tone: "steady",
+      snippet_ids: ["work-is-not-solitary", "receive-good-counsel"],
+      passage_hints: ["ECC.4.9-10", "PRO.15.22", "ROM.12.10", "COL.3.23"],
+      fallback_passage_hint: "COL.3.23",
+      weight: 0.75
+    },
+    {
+      id: "today-in-the-church-year",
+      task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["calendar", "presence"],
+      tone: "reflective",
+      snippet_ids: ["today-joins-this-pause", "receive-todays-witness"],
+      passage_hints: [
+        "MAT.2.10-11",
+        "LUK.2.29-32",
+        "LUK.1.30-33",
+        "LUK.1.76-79",
+        "MAT.16.15-18",
+        "JHN.20.16-18",
+        "JHN.15.4-5",
+        "MAT.20.26-28",
+        "JHN.11.25-27",
+        "LUK.9.34-36",
+        "LUK.1.46-49",
+        "JHN.3.16-17",
+        "MAT.5.8-10",
+        "JHN.6.37-40",
+        "LUK.2.10-14",
+        "ACT.7.59-60",
+        "JHN.21.22-24",
+        "MAT.6.3-6",
+        "MAT.21.8-11",
+        "JHN.13.12-15",
+        "JHN.19.28-30",
+        "ACT.1.9-11",
+        "ACT.2.1-4",
+        "MAT.28.18-20",
+        "PSA.46.10"
+      ],
+      fallback_passage_hint: "PSA.46.10",
+      observance_ids: [
+        "epiphany",
+        "presentation",
+        "annunciation",
+        "nativity-john-baptist",
+        "peter-and-paul",
+        "mary-magdalene",
+        "bridget-of-sweden",
+        "james-apostle",
+        "martha-mary-lazarus",
+        "transfiguration",
+        "assumption",
+        "holy-cross",
+        "all-saints",
+        "all-souls",
+        "christmas",
+        "stephen",
+        "john-apostle",
+        "ash-wednesday",
+        "palm-sunday",
+        "maundy-thursday",
+        "good-friday",
+        "easter-day",
+        "ascension",
+        "pentecost",
+        "trinity-sunday"
+      ],
+      requires_calendar_match: true,
+      weight: 1.4
+    },
+    {
+      id: "season-of-advent",
+      task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["advent", "watchfulness"],
+      tone: "reflective",
+      snippet_ids: ["advent-watchfulness", "advent-hope"],
+      passage_hints: ["ROM.13.11-12", "ISA.40.3-5", "PSA.46.10"],
+      fallback_passage_hint: "PSA.46.10",
+      liturgical_seasons: ["advent"],
+      requires_calendar_match: true,
+      weight: 0.9
+    },
+    {
+      id: "season-of-lent",
+      task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["lent", "return"],
+      tone: "reflective",
+      snippet_ids: ["lent-return", "lent-honesty"],
+      passage_hints: ["PSA.51.10-12", "JOE.2.12-13", "PSA.46.10"],
+      fallback_passage_hint: "PSA.46.10",
+      liturgical_seasons: ["lent", "holy-week"],
+      requires_calendar_match: true,
+      weight: 0.9
+    },
+    {
+      id: "season-of-easter",
+      task_types: ["generation", "implementation", "debugging", "testing", "analysis", "refactor", "planning", "review", "unknown"],
+      themes: ["easter", "new-life"],
+      tone: "encouraging",
+      snippet_ids: ["easter-newness", "easter-hope"],
+      passage_hints: ["COL.3.1-4", "1PE.1.3", "PSA.126.3"],
+      fallback_passage_hint: "PSA.126.3",
+      liturgical_seasons: ["easter"],
+      requires_calendar_match: true,
       weight: 0.9
     }
   ],
   snippets: [
-    {
-      id: "pause-and-release",
-      locale: "en-US",
-      text: "One slow breath. The result can arrive without carrying all your attention.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "work-with-purpose",
-      locale: "en-US",
-      text: "Let the build run. Return to the purpose beneath the task.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "make-room-for-wisdom",
-      locale: "en-US",
-      text: "The bug can wait five seconds. Make room for wisdom before the next attempt.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "hope-while-it-runs",
-      locale: "en-US",
-      text: "While the tests run, loosen your shoulders and hold on to hope.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "hold-the-plan-lightly",
-      locale: "en-US",
-      text: "Commit the work. Hold the outcome with open hands.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "notice-what-is-good",
-      locale: "en-US",
-      text: "Before finding the flaw, take a moment to notice what is true and good.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "you-can-rest",
-      locale: "en-US",
-      text: "This task is not a measure of your worth. Receive a moment of rest.",
-      status: "approved-for-demo"
-    },
-    {
-      id: "set-down-the-worry",
-      locale: "en-US",
-      text: "Name the worry, then set it down for the length of one breath.",
-      status: "approved-for-demo"
-    }
+    { id: "pause-and-release", locale: "en-US", text: "One slow breath. The result can arrive without carrying all your attention.", status: "approved-for-demo" },
+    { id: "pause-and-release", locale: "fr-FR", text: "Une respiration lente. Le r\xE9sultat peut arriver sans prendre toute votre attention.", status: "approved-for-demo" },
+    { id: "quiet-with-trust", locale: "en-US", text: "Let the process continue. For five seconds, choose quiet over control.", status: "approved-for-demo" },
+    { id: "quiet-with-trust", locale: "fr-FR", text: "Laissez le processus continuer. Pendant cinq secondes, choisissez le calme plut\xF4t que le contr\xF4le.", status: "approved-for-demo" },
+    { id: "work-with-purpose", locale: "en-US", text: "Let the build run. Return to the purpose beneath the task.", status: "approved-for-demo" },
+    { id: "work-with-purpose", locale: "fr-FR", text: "Laissez la compilation avancer. Revenez au sens profond de cette t\xE2che.", status: "approved-for-demo" },
+    { id: "faithful-next-step", locale: "en-US", text: "The whole project need not fit in this moment. Receive the next faithful step.", status: "approved-for-demo" },
+    { id: "faithful-next-step", locale: "fr-FR", text: "Le projet entier n'a pas \xE0 tenir dans cet instant. Accueillez simplement la prochaine \xE9tape fid\xE8le.", status: "approved-for-demo" },
+    { id: "make-room-for-wisdom", locale: "en-US", text: "The bug can wait five seconds. Make room for wisdom before the next attempt.", status: "approved-for-demo" },
+    { id: "make-room-for-wisdom", locale: "fr-FR", text: "Le bug peut attendre cinq secondes. Faites place \xE0 la sagesse avant la prochaine tentative.", status: "approved-for-demo" },
+    { id: "look-again-with-wisdom", locale: "en-US", text: "Before looking again, become quiet enough to notice what the first glance missed.", status: "approved-for-demo" },
+    { id: "look-again-with-wisdom", locale: "fr-FR", text: "Avant de regarder encore, faites assez de silence pour voir ce que le premier regard a manqu\xE9.", status: "approved-for-demo" },
+    { id: "hope-while-it-runs", locale: "en-US", text: "While the tests run, loosen your shoulders and hold on to hope.", status: "approved-for-demo" },
+    { id: "hope-while-it-runs", locale: "fr-FR", text: "Pendant les tests, rel\xE2chez vos \xE9paules et gardez l'esp\xE9rance.", status: "approved-for-demo" },
+    { id: "steady-in-the-delay", locale: "en-US", text: "Waiting for evidence is part of careful work. Let patience have these seconds.", status: "approved-for-demo" },
+    { id: "steady-in-the-delay", locale: "fr-FR", text: "Attendre les r\xE9sultats fait partie d'un travail attentif. Laissez la patience habiter ces secondes.", status: "approved-for-demo" },
+    { id: "hold-the-plan-lightly", locale: "en-US", text: "Commit the work. Hold the outcome with open hands.", status: "approved-for-demo" },
+    { id: "hold-the-plan-lightly", locale: "fr-FR", text: "Engagez le travail. Gardez le r\xE9sultat entre des mains ouvertes.", status: "approved-for-demo" },
+    { id: "plans-with-open-hands", locale: "en-US", text: "A good plan can be held with care without becoming a burden.", status: "approved-for-demo" },
+    { id: "plans-with-open-hands", locale: "fr-FR", text: "Un bon plan peut \xEAtre port\xE9 avec soin sans devenir un fardeau.", status: "approved-for-demo" },
+    { id: "notice-what-is-good", locale: "en-US", text: "Before finding the flaw, take a moment to notice what is true and good.", status: "approved-for-demo" },
+    { id: "notice-what-is-good", locale: "fr-FR", text: "Avant de chercher le d\xE9faut, prenez un instant pour remarquer ce qui est vrai et bon.", status: "approved-for-demo" },
+    { id: "listen-before-judging", locale: "en-US", text: "Review needs both clarity and humility. Listen once more before deciding.", status: "approved-for-demo" },
+    { id: "listen-before-judging", locale: "fr-FR", text: "La relecture demande clart\xE9 et humilit\xE9. \xC9coutez encore avant de d\xE9cider.", status: "approved-for-demo" },
+    { id: "you-can-rest", locale: "en-US", text: "This task is not a measure of your worth. Receive a moment of rest.", status: "approved-for-demo" },
+    { id: "you-can-rest", locale: "fr-FR", text: "Cette t\xE2che ne mesure pas votre valeur. Accueillez un instant de repos.", status: "approved-for-demo" },
+    { id: "enough-for-today", locale: "en-US", text: "The work may continue tomorrow. For this breath, enough is enough.", status: "approved-for-demo" },
+    { id: "enough-for-today", locale: "fr-FR", text: "Le travail pourra continuer demain. Pour cette respiration, ce qui est fait suffit.", status: "approved-for-demo" },
+    { id: "set-down-the-worry", locale: "en-US", text: "If worry is present, set it down for the length of one breath.", status: "approved-for-demo" },
+    { id: "set-down-the-worry", locale: "fr-FR", text: "Si l'inqui\xE9tude est pr\xE9sente, d\xE9posez-la le temps d'une respiration.", status: "approved-for-demo" },
+    { id: "uncertainty-is-not-solitude", locale: "en-US", text: "Not knowing the answer does not mean carrying the question alone.", status: "approved-for-demo" },
+    { id: "uncertainty-is-not-solitude", locale: "fr-FR", text: "Ne pas conna\xEEtre la r\xE9ponse ne signifie pas porter la question seul.", status: "approved-for-demo" },
+    { id: "one-faithful-step", locale: "en-US", text: "This is another attempt, not a verdict. Take the next faithful step.", status: "approved-for-demo" },
+    { id: "one-faithful-step", locale: "fr-FR", text: "C'est une nouvelle tentative, pas un verdict. Faites la prochaine \xE9tape avec fid\xE9lit\xE9.", status: "approved-for-demo" },
+    { id: "patience-in-retrying", locale: "en-US", text: "Repeated work can narrow the heart. Let patience widen this next attempt.", status: "approved-for-demo" },
+    { id: "patience-in-retrying", locale: "fr-FR", text: "Le travail r\xE9p\xE9t\xE9 peut resserrer le c\u0153ur. Que la patience \xE9largisse cette nouvelle tentative.", status: "approved-for-demo" },
+    { id: "receive-the-progress", locale: "en-US", text: "Before moving to the next task, receive this progress with gratitude.", status: "approved-for-demo" },
+    { id: "receive-the-progress", locale: "fr-FR", text: "Avant la prochaine t\xE2che, accueillez ce progr\xE8s avec gratitude.", status: "approved-for-demo" },
+    { id: "gratitude-before-next", locale: "en-US", text: "The work moved forward. Let gratitude have one moment before momentum resumes.", status: "approved-for-demo" },
+    { id: "gratitude-before-next", locale: "fr-FR", text: "Le travail a avanc\xE9. Laissez une place \xE0 la gratitude avant de reprendre l'\xE9lan.", status: "approved-for-demo" },
+    { id: "work-is-not-solitary", locale: "en-US", text: "Good work is rarely solitary. Remember the people whose wisdom supports this task.", status: "approved-for-demo" },
+    { id: "work-is-not-solitary", locale: "fr-FR", text: "Le bon travail est rarement solitaire. Souvenez-vous de ceux dont la sagesse soutient cette t\xE2che.", status: "approved-for-demo" },
+    { id: "receive-good-counsel", locale: "en-US", text: "Pause before deciding alone. Good counsel can make the work steadier.", status: "approved-for-demo" },
+    { id: "receive-good-counsel", locale: "fr-FR", text: "Faites une pause avant de d\xE9cider seul. Un bon conseil peut affermir le travail.", status: "approved-for-demo" },
+    { id: "today-joins-this-pause", locale: "en-US", text: "This pause belongs to a larger day of remembrance. Receive its witness without hurry.", status: "approved-for-demo" },
+    { id: "today-joins-this-pause", locale: "fr-FR", text: "Cette pause appartient \xE0 un jour de m\xE9moire plus vaste. Accueillez son t\xE9moignage sans h\xE2te.", status: "approved-for-demo" },
+    { id: "receive-todays-witness", locale: "en-US", text: "The Church's calendar carries a story into today. Let it meet these few seconds.", status: "approved-for-demo" },
+    { id: "receive-todays-witness", locale: "fr-FR", text: "Le calendrier de l'\xC9glise porte une histoire jusqu'\xE0 aujourd'hui. Laissez-la rejoindre ces quelques secondes.", status: "approved-for-demo" },
+    { id: "advent-watchfulness", locale: "en-US", text: "Advent makes room for patient attention. Stay awake to this small moment.", status: "approved-for-demo" },
+    { id: "advent-watchfulness", locale: "fr-FR", text: "L'Avent ouvre un espace d'attention patiente. Restez \xE9veill\xE9 \xE0 ce petit instant.", status: "approved-for-demo" },
+    { id: "advent-hope", locale: "en-US", text: "Waiting is not empty when it is held with hope.", status: "approved-for-demo" },
+    { id: "advent-hope", locale: "fr-FR", text: "L'attente n'est pas vide lorsqu'elle est port\xE9e par l'esp\xE9rance.", status: "approved-for-demo" },
+    { id: "lent-return", locale: "en-US", text: "Lent turns attention from noise toward what is essential. Return for one breath.", status: "approved-for-demo" },
+    { id: "lent-return", locale: "fr-FR", text: "Le Car\xEAme d\xE9tourne l'attention du bruit vers l'essentiel. Revenez-y le temps d'une respiration.", status: "approved-for-demo" },
+    { id: "lent-honesty", locale: "en-US", text: "This season permits honesty without despair and change without performance.", status: "approved-for-demo" },
+    { id: "lent-honesty", locale: "fr-FR", text: "Cette saison permet la v\xE9rit\xE9 sans d\xE9sespoir et le changement sans mise en sc\xE8ne.", status: "approved-for-demo" },
+    { id: "easter-newness", locale: "en-US", text: "Easter names the possibility that an ending need not have the final word.", status: "approved-for-demo" },
+    { id: "easter-newness", locale: "fr-FR", text: "P\xE2ques annonce qu'une fin n'a pas n\xE9cessairement le dernier mot.", status: "approved-for-demo" },
+    { id: "easter-hope", locale: "en-US", text: "Receive this moment as a small practice of hope and newness.", status: "approved-for-demo" },
+    { id: "easter-hope", locale: "fr-FR", text: "Accueillez cet instant comme un petit exercice d'esp\xE9rance et de nouveaut\xE9.", status: "approved-for-demo" }
+  ],
+  passage_hints: [
+    { usfm: "PSA.46.10", reference: "Psalm 46:10", themes: ["stillness", "trust"], review_status: "approved-for-demo" },
+    { usfm: "PSA.37.5", reference: "Psalm 37:5", themes: ["trust"], review_status: "approved-for-demo" },
+    { usfm: "ISA.30.15", reference: "Isaiah 30:15", themes: ["stillness", "trust"], review_status: "approved-for-demo" },
+    { usfm: "COL.3.23", reference: "Colossians 3:23", themes: ["purpose", "faithful-work"], review_status: "approved-for-demo" },
+    { usfm: "PSA.90.17", reference: "Psalm 90:17", themes: ["purpose", "faithful-work"], review_status: "approved-for-demo" },
+    { usfm: "1CO.10.31", reference: "1 Corinthians 10:31", themes: ["purpose"], review_status: "approved-for-demo" },
+    { usfm: "JAS.1.5", reference: "James 1:5", themes: ["wisdom"], review_status: "approved-for-demo" },
+    { usfm: "PRO.2.6", reference: "Proverbs 2:6", themes: ["wisdom"], review_status: "approved-for-demo" },
+    { usfm: "PRO.3.5-6", reference: "Proverbs 3:5\u20136", themes: ["wisdom", "trust"], review_status: "approved-for-demo" },
+    { usfm: "ROM.12.12", reference: "Romans 12:12", themes: ["hope", "patience"], review_status: "approved-for-demo" },
+    { usfm: "GAL.6.9", reference: "Galatians 6:9", themes: ["perseverance", "hope"], review_status: "approved-for-demo" },
+    { usfm: "JAS.1.2-4", reference: "James 1:2\u20134", themes: ["perseverance", "patience"], review_status: "approved-for-demo" },
+    { usfm: "PRO.16.3", reference: "Proverbs 16:3", themes: ["planning", "surrender"], review_status: "approved-for-demo" },
+    { usfm: "JAS.4.13-15", reference: "James 4:13\u201315", themes: ["planning", "surrender"], review_status: "approved-for-demo" },
+    { usfm: "PSA.127.1", reference: "Psalm 127:1", themes: ["planning", "purpose"], review_status: "approved-for-demo" },
+    { usfm: "PHP.4.8", reference: "Philippians 4:8", themes: ["discernment", "care"], review_status: "approved-for-demo" },
+    { usfm: "1TH.5.21", reference: "1 Thessalonians 5:21", themes: ["discernment"], review_status: "approved-for-demo" },
+    { usfm: "PRO.18.13", reference: "Proverbs 18:13", themes: ["discernment", "care"], review_status: "approved-for-demo" },
+    { usfm: "MAT.11.28", reference: "Matthew 11:28", themes: ["rest", "care"], review_status: "approved-for-demo" },
+    { usfm: "PSA.4.8", reference: "Psalm 4:8", themes: ["rest", "trust"], review_status: "approved-for-demo" },
+    { usfm: "PSA.127.2", reference: "Psalm 127:2", themes: ["rest", "worth"], review_status: "approved-for-demo" },
+    { usfm: "1PE.5.7", reference: "1 Peter 5:7", themes: ["care", "uncertainty"], review_status: "approved-for-demo" },
+    { usfm: "PHP.4.6-7", reference: "Philippians 4:6\u20137", themes: ["care", "uncertainty"], review_status: "approved-for-demo" },
+    { usfm: "PSA.55.22", reference: "Psalm 55:22", themes: ["care", "uncertainty"], review_status: "approved-for-demo" },
+    { usfm: "HEB.12.1-2", reference: "Hebrews 12:1\u20132", themes: ["perseverance"], review_status: "approved-for-demo" },
+    { usfm: "ROM.5.3-4", reference: "Romans 5:3\u20134", themes: ["perseverance", "hope"], review_status: "approved-for-demo" },
+    { usfm: "1TH.5.18", reference: "1 Thessalonians 5:18", themes: ["gratitude"], review_status: "approved-for-demo" },
+    { usfm: "PSA.126.3", reference: "Psalm 126:3", themes: ["gratitude", "completion"], review_status: "approved-for-demo" },
+    { usfm: "PSA.92.1-2", reference: "Psalm 92:1\u20132", themes: ["gratitude"], review_status: "approved-for-demo" },
+    { usfm: "ECC.4.9-10", reference: "Ecclesiastes 4:9\u201310", themes: ["community"], review_status: "approved-for-demo" },
+    { usfm: "PRO.15.22", reference: "Proverbs 15:22", themes: ["community", "counsel"], review_status: "approved-for-demo" },
+    { usfm: "ROM.12.10", reference: "Romans 12:10", themes: ["community", "care"], review_status: "approved-for-demo" },
+    { usfm: "MAT.2.10-11", reference: "Matthew 2:10\u201311", themes: ["calendar"], observance_ids: ["epiphany"], review_status: "approved-for-demo" },
+    { usfm: "LUK.2.29-32", reference: "Luke 2:29\u201332", themes: ["calendar"], observance_ids: ["presentation"], review_status: "approved-for-demo" },
+    { usfm: "LUK.1.30-33", reference: "Luke 1:30\u201333", themes: ["calendar"], observance_ids: ["annunciation"], review_status: "approved-for-demo" },
+    { usfm: "LUK.1.76-79", reference: "Luke 1:76\u201379", themes: ["calendar"], observance_ids: ["nativity-john-baptist"], review_status: "approved-for-demo" },
+    { usfm: "MAT.16.15-18", reference: "Matthew 16:15\u201318", themes: ["calendar"], observance_ids: ["peter-and-paul"], review_status: "approved-for-demo" },
+    { usfm: "JHN.20.16-18", reference: "John 20:16\u201318", themes: ["calendar", "easter"], observance_ids: ["mary-magdalene", "easter-day"], review_status: "approved-for-demo" },
+    { usfm: "JHN.15.4-5", reference: "John 15:4\u20135", themes: ["calendar", "abiding"], observance_ids: ["bridget-of-sweden"], review_status: "approved-for-demo" },
+    { usfm: "MAT.20.26-28", reference: "Matthew 20:26\u201328", themes: ["calendar"], observance_ids: ["james-apostle"], review_status: "approved-for-demo" },
+    { usfm: "JHN.11.25-27", reference: "John 11:25\u201327", themes: ["calendar"], observance_ids: ["martha-mary-lazarus"], review_status: "approved-for-demo" },
+    { usfm: "LUK.9.34-36", reference: "Luke 9:34\u201336", themes: ["calendar"], observance_ids: ["transfiguration"], review_status: "approved-for-demo" },
+    { usfm: "LUK.1.46-49", reference: "Luke 1:46\u201349", themes: ["calendar"], observance_ids: ["assumption"], review_status: "approved-for-demo" },
+    { usfm: "JHN.3.16-17", reference: "John 3:16\u201317", themes: ["calendar"], observance_ids: ["holy-cross"], review_status: "approved-for-demo" },
+    { usfm: "MAT.5.8-10", reference: "Matthew 5:8\u201310", themes: ["calendar"], observance_ids: ["all-saints"], review_status: "approved-for-demo" },
+    { usfm: "JHN.6.37-40", reference: "John 6:37\u201340", themes: ["calendar", "hope"], observance_ids: ["all-souls"], review_status: "approved-for-demo" },
+    { usfm: "LUK.2.10-14", reference: "Luke 2:10\u201314", themes: ["calendar", "christmas"], observance_ids: ["christmas"], review_status: "approved-for-demo" },
+    { usfm: "ACT.7.59-60", reference: "Acts 7:59\u201360", themes: ["calendar"], observance_ids: ["stephen"], review_status: "approved-for-demo" },
+    { usfm: "JHN.21.22-24", reference: "John 21:22\u201324", themes: ["calendar"], observance_ids: ["john-apostle"], review_status: "approved-for-demo" },
+    { usfm: "MAT.6.3-6", reference: "Matthew 6:3\u20136", themes: ["calendar", "lent"], observance_ids: ["ash-wednesday"], review_status: "approved-for-demo" },
+    { usfm: "MAT.21.8-11", reference: "Matthew 21:8\u201311", themes: ["calendar"], observance_ids: ["palm-sunday"], review_status: "approved-for-demo" },
+    { usfm: "JHN.13.12-15", reference: "John 13:12\u201315", themes: ["calendar"], observance_ids: ["maundy-thursday"], review_status: "approved-for-demo" },
+    { usfm: "JHN.19.28-30", reference: "John 19:28\u201330", themes: ["calendar"], observance_ids: ["good-friday"], review_status: "approved-for-demo" },
+    { usfm: "ACT.1.9-11", reference: "Acts 1:9\u201311", themes: ["calendar"], observance_ids: ["ascension"], review_status: "approved-for-demo" },
+    { usfm: "ACT.2.1-4", reference: "Acts 2:1\u20134", themes: ["calendar"], observance_ids: ["pentecost"], review_status: "approved-for-demo" },
+    { usfm: "MAT.28.18-20", reference: "Matthew 28:18\u201320", themes: ["calendar"], observance_ids: ["trinity-sunday"], review_status: "approved-for-demo" },
+    { usfm: "ROM.13.11-12", reference: "Romans 13:11\u201312", themes: ["advent", "watchfulness"], review_status: "approved-for-demo" },
+    { usfm: "ISA.40.3-5", reference: "Isaiah 40:3\u20135", themes: ["advent", "hope"], review_status: "approved-for-demo" },
+    { usfm: "PSA.51.10-12", reference: "Psalm 51:10\u201312", themes: ["lent", "return"], review_status: "approved-for-demo" },
+    { usfm: "JOE.2.12-13", reference: "Joel 2:12\u201313", themes: ["lent", "return"], review_status: "approved-for-demo" },
+    { usfm: "COL.3.1-4", reference: "Colossians 3:1\u20134", themes: ["easter", "new-life"], review_status: "approved-for-demo" },
+    { usfm: "1PE.1.3", reference: "1 Peter 1:3", themes: ["easter", "hope"], review_status: "approved-for-demo" }
   ],
   offline_passages: [
     {
@@ -15076,6 +15987,15 @@ var catalog_default = {
       version_name: "World English Bible",
       copyright: "World English Bible \u2014 Public Domain",
       locale: "en-US"
+    },
+    {
+      usfm: "PSA.126.3",
+      reference: "Psalm 126:3",
+      text: "Yahweh has done great things for us, and we are glad.",
+      version_id: "WEB",
+      version_name: "World English Bible",
+      copyright: "World English Bible \u2014 Public Domain",
+      locale: "en-US"
     }
   ]
 };
@@ -15086,20 +16006,39 @@ var ContentRepository = class {
   release = catalog.release;
   reviewNotice = catalog.review_notice;
   profiles = catalog.profiles;
-  snippets = new Map(catalog.snippets.map((item) => [item.id, item]));
+  snippets = /* @__PURE__ */ new Map();
+  passageHints = new Map(catalog.passage_hints.map((item) => [item.usfm, item]));
   offlinePassages = new Map(catalog.offline_passages.map((item) => [item.usfm, item]));
   constructor() {
+    for (const snippet of catalog.snippets) {
+      const locales = this.snippets.get(snippet.id) ?? /* @__PURE__ */ new Map();
+      if (locales.has(snippet.locale)) {
+        throw new Error(`Duplicate snippet locale: ${snippet.id}/${snippet.locale}`);
+      }
+      locales.set(snippet.locale, snippet);
+      this.snippets.set(snippet.id, locales);
+    }
     const profileIds = /* @__PURE__ */ new Set();
     for (const profile of this.profiles) {
       if (profileIds.has(profile.id)) {
         throw new Error(`Duplicate profile id: ${profile.id}`);
       }
       profileIds.add(profile.id);
-      if (!this.snippets.has(profile.snippet_id)) {
-        throw new Error(`Profile ${profile.id} references missing snippet ${profile.snippet_id}`);
+      for (const snippetId of profile.snippet_ids) {
+        if (!this.snippets.has(snippetId)) {
+          throw new Error(`Profile ${profile.id} references missing snippet ${snippetId}`);
+        }
       }
-      if (!this.offlinePassages.has(profile.passage_hint)) {
-        throw new Error(`Profile ${profile.id} references unknown passage ${profile.passage_hint}`);
+      for (const usfm of profile.passage_hints) {
+        if (!this.passageHints.has(usfm)) {
+          throw new Error(`Profile ${profile.id} references unknown passage ${usfm}`);
+        }
+      }
+      if (!profile.passage_hints.includes(profile.fallback_passage_hint)) {
+        throw new Error(`Profile ${profile.id} fallback must be one of its passage hints`);
+      }
+      if (!this.offlinePassages.has(profile.fallback_passage_hint)) {
+        throw new Error(`Profile ${profile.id} fallback has no bundled public-domain text`);
       }
     }
   }
@@ -15107,22 +16046,33 @@ var ContentRepository = class {
     return this.profiles.find((profile) => profile.id === id);
   }
   getSnippet(id, locale) {
-    const snippet = this.snippets.get(id);
-    if (!snippet) throw new Error(`Unknown snippet id: ${id}`);
-    if (snippet.locale !== locale && locale !== "en-US") {
-      return snippet;
-    }
-    return snippet;
+    const locales = this.snippets.get(id);
+    if (!locales) throw new Error(`Unknown snippet id: ${id}`);
+    const normalized = locale.toLowerCase();
+    const language = normalized.split("-")[0] ?? normalized;
+    const exact = [...locales.entries()].find(([candidate]) => candidate.toLowerCase() === normalized)?.[1];
+    const languageMatch = [...locales.values()].find((candidate) => {
+      return candidate.locale.toLowerCase().split("-")[0] === language;
+    });
+    const fallback = locales.get("en-US") ?? locales.values().next().value;
+    const selected = exact ?? languageMatch ?? fallback;
+    if (!selected) throw new Error(`Snippet ${id} has no locale`);
+    return selected;
   }
   /** Human-readable reference (e.g. "Psalm 46:10") for a USFM passage hint. */
   referenceFor(usfm) {
-    return this.offlinePassages.get(usfm)?.reference ?? usfm;
+    return this.passageHints.get(usfm)?.reference ?? this.offlinePassages.get(usfm)?.reference ?? usfm;
+  }
+  getPassageHint(usfm) {
+    const hint = this.passageHints.get(usfm);
+    if (!hint) throw new Error(`Unknown passage hint: ${usfm}`);
+    return hint;
   }
   /**
    * Bundled public-domain (World English Bible) verse used only as an offline
    * fallback when the live YouVersion API is unreachable at runtime.
    */
-  getOfflinePassage(usfm, locale) {
+  getOfflinePassage(usfm, _locale) {
     const fixture = this.offlinePassages.get(usfm);
     if (!fixture) throw new Error(`No offline passage bundled for ${usfm}`);
     return {
@@ -15132,13 +16082,65 @@ var ContentRepository = class {
       versionId: fixture.version_id,
       versionName: fixture.version_name,
       copyright: fixture.copyright,
-      locale: locale || fixture.locale
+      locale: fixture.locale
     };
   }
-  candidatesFor(event) {
+  candidatesFor(completeEvent) {
+    const event = completeEvent;
     return this.profiles.filter((profile) => {
-      if (!profile.task_types.includes(event.taskType)) return false;
-      return !profile.time_windows || profile.time_windows.includes(event.timeWindow);
+      const taskTypes = completeEvent.taskTypes ?? [event.taskType];
+      if (!profile.task_types.some((taskType) => taskTypes.includes(taskType))) return false;
+      if (profile.requires_time_match && (!profile.time_windows || !profile.time_windows.includes(event.timeWindow))) {
+        return false;
+      }
+      if (profile.requires_workflow_match && (!profile.workflow_stages || !profile.workflow_stages.includes(completeEvent.workflowStage))) {
+        return false;
+      }
+      if (profile.requires_calendar_match) {
+        const seasonMatch = profile.liturgical_seasons?.includes(completeEvent.calendar.season) ?? false;
+        const observanceMatch = profile.observance_ids?.some((id) => {
+          return completeEvent.calendar.observanceIds.includes(id);
+        }) ?? false;
+        if (!seasonMatch && !observanceMatch) return false;
+      }
+      return true;
+    }).sort((left, right) => this.scoreProfile(completeEvent, right) - this.scoreProfile(completeEvent, left));
+  }
+  scoreProfile(event, profile) {
+    let score = Math.log2(profile.weight + 1);
+    if (profile.task_types.includes(event.taskType)) score += 4;
+    score += event.taskTypes.filter((taskType) => profile.task_types.includes(taskType)).length * 1.25;
+    if (profile.time_windows?.includes(event.timeWindow)) score += 1.5;
+    if (profile.workflow_stages?.includes(event.workflowStage)) score += 3;
+    if (event.repeatBucket === "three-plus" && profile.themes.includes("perseverance")) score += 2;
+    if (event.lastOutcome === "success" && profile.themes.includes("gratitude")) score += 3;
+    if (event.preferredTone !== "balanced" && profile.tone === event.preferredTone) score += 2.5;
+    if (profile.liturgical_seasons?.includes(event.calendar.season)) score += 2;
+    if (profile.observance_ids?.some((id) => event.calendar.observanceIds.includes(id))) score += 6;
+    if (event.recentProfileIds.includes(profile.id)) score -= 4;
+    if (event.preferredProfileIds.includes(profile.id)) score += 3;
+    if (event.avoidedProfileIds.includes(profile.id)) score -= 10;
+    return score;
+  }
+  passageCandidatesFor(profile, event) {
+    return [...profile.passage_hints].sort((left, right) => {
+      const score = (usfm) => {
+        const hint = this.getPassageHint(usfm);
+        let value = 0;
+        if (event.calendar.lectionaryRefs.includes(usfm)) value += 12;
+        if (hint.observance_ids?.some((id) => event.calendar.observanceIds.includes(id))) value += 8;
+        if (event.recentPassageIds.includes(usfm)) value -= 20;
+        if (event.avoidedPassageIds.includes(usfm)) value -= 30;
+        return value;
+      };
+      return score(right) - score(left) || left.localeCompare(right);
+    });
+  }
+  snippetCandidatesFor(profile, event) {
+    return [...profile.snippet_ids].sort((left, right) => {
+      const leftRecent = event.recentSnippetIds.includes(left) ? 1 : 0;
+      const rightRecent = event.recentSnippetIds.includes(right) ? 1 : 0;
+      return leftRecent - rightRecent || left.localeCompare(right);
     });
   }
   taskTypes() {
@@ -15171,6 +16173,35 @@ async function parseJsonResponse(response, providerName) {
     throw new Error(`${providerName} returned invalid JSON`);
   }
 }
+function retryDelay(response, attempt) {
+  const retryAfter = response?.headers.get("Retry-After");
+  if (retryAfter) {
+    const seconds = Number.parseFloat(retryAfter);
+    if (Number.isFinite(seconds)) return Math.min(2e3, Math.max(0, seconds * 1e3));
+  }
+  return 150 * 2 ** attempt;
+}
+async function fetchJsonWithRetry(fetchImplementation, input, init, timeoutMilliseconds, providerName, attempts = 2) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetchWithTimeout(fetchImplementation, input, init, timeoutMilliseconds);
+    } catch (error51) {
+      lastError = error51;
+      if (attempt === attempts - 1) throw error51;
+      await new Promise((resolve) => setTimeout(resolve, retryDelay(void 0, attempt)));
+      continue;
+    }
+    const transient = response.status === 429 || response.status >= 500;
+    if (!transient || attempt === attempts - 1) {
+      return parseJsonResponse(response, providerName);
+    }
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, retryDelay(response, attempt)));
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${providerName} request failed`);
+}
 
 // src/providers/gloo.ts
 var TokenResponseSchema = external_exports.object({
@@ -15189,7 +16220,7 @@ var GlooSelector = class {
       throw new Error("GLOO_RAG_PUBLISHER is required for grounded endpoint mode");
     }
     this.fetchImplementation = options.fetchImplementation ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 1e4;
+    this.timeoutMs = options.timeoutMs ?? 3e4;
   }
   options;
   accessToken;
@@ -15198,44 +16229,74 @@ var GlooSelector = class {
   async select(event, candidates) {
     const token = await this.getAccessToken();
     const instructions = this.buildInstructions(candidates);
+    const tool = this.buildSelectionTool(candidates);
     const safeInput = JSON.stringify({
       surface: event.surface,
       taskType: event.taskType,
+      taskTypes: event.taskTypes,
       durationBucket: event.durationBucket,
       locale: event.locale,
       timeWindow: event.timeWindow,
+      workflowStage: event.workflowStage,
+      lastOutcome: event.lastOutcome,
+      repeatBucket: event.repeatBucket,
+      effortBucket: event.effortBucket,
+      tradition: event.tradition,
+      preferredTone: event.preferredTone,
+      calendar: event.calendar,
+      recentPassageIds: event.recentPassageIds,
+      recentSnippetIds: event.recentSnippetIds,
+      recentProfileIds: event.recentProfileIds,
+      preferredProfileIds: event.preferredProfileIds,
+      avoidedProfileIds: event.avoidedProfileIds,
+      avoidedPassageIds: event.avoidedPassageIds,
       contextMode: event.contextMode
     });
+    const tradition = this.options.tradition || (event.tradition === "ecumenical" ? "" : event.tradition);
+    const sharedBody = {
+      messages: [
+        { role: "system", content: instructions },
+        { role: "user", content: safeInput }
+      ],
+      tools: [tool],
+      tool_choice: "required",
+      temperature: 0,
+      ...tradition ? { tradition } : {}
+    };
     const request = this.options.endpointMode === "grounded" ? {
       url: `${this.options.baseUrl}/ai/v2/chat/completions/grounded`,
       body: {
-        messages: [
-          { role: "system", content: instructions },
-          { role: "user", content: safeInput }
-        ],
+        ...sharedBody,
         auto_routing: true,
         rag_publisher: this.options.ragPublisher,
-        sources_limit: 3,
-        ...this.options.tradition ? { tradition: this.options.tradition } : {}
+        sources_limit: 5,
+        include_citations: true
       }
     } : {
-      url: `${this.options.baseUrl}/ai/v1/responses`,
+      url: `${this.options.baseUrl}/ai/v2/chat/completions`,
       body: {
+        ...sharedBody,
         model: this.options.model,
-        instructions,
-        input: [{ role: "user", content: safeInput }]
+        max_tokens: 300
       }
     };
-    const response = await fetchWithTimeout(this.fetchImplementation, request.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+    const body = await fetchJsonWithRetry(
+      this.fetchImplementation,
+      request.url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(request.body)
       },
-      body: JSON.stringify(request.body)
-    }, this.timeoutMs);
-    const body = await parseJsonResponse(response, "Gloo");
-    const decision = SelectorDecisionSchema.parse(JSON.parse(this.extractText(body)));
+      this.timeoutMs,
+      "Gloo"
+    );
+    const decision = SelectorDecisionSchema.parse(
+      JSON.parse(this.extractDecisionPayload(body))
+    );
     return {
       decision,
       metadata: {
@@ -15250,7 +16311,7 @@ var GlooSelector = class {
       return this.accessToken.value;
     }
     const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
-    const response = await fetchWithTimeout(
+    const body = await fetchJsonWithRetry(
       this.fetchImplementation,
       `${this.options.baseUrl}/oauth2/token`,
       {
@@ -15261,9 +16322,10 @@ var GlooSelector = class {
         },
         body: new URLSearchParams({ grant_type: "client_credentials", scope: "api/access" })
       },
-      this.timeoutMs
+      this.timeoutMs,
+      "Gloo auth"
     );
-    const token = TokenResponseSchema.parse(await parseJsonResponse(response, "Gloo auth"));
+    const token = TokenResponseSchema.parse(body);
     this.accessToken = {
       value: token.access_token,
       expiresAt: Date.now() + token.expires_in * 1e3
@@ -15271,37 +16333,103 @@ var GlooSelector = class {
     return token.access_token;
   }
   buildInstructions(candidates) {
-    const allowed = candidates.map((profile) => ({
+    const allowed = candidates.map((profile, index) => ({
+      contextRank: index + 1,
       momentProfileId: profile.id,
-      reflectionSnippetId: profile.snippet_id,
-      passageHint: profile.passage_hint,
-      tone: profile.tone
+      themes: profile.themes,
+      reflectionSnippetIds: profile.snippet_ids,
+      passageHints: profile.passage_hints,
+      tone: profile.tone,
+      workflowStages: profile.workflow_stages ?? [],
+      liturgicalSeasons: profile.liturgical_seasons ?? [],
+      observanceIds: profile.observance_ids ?? [],
+      weight: profile.weight
     }));
     return [
-      "You are a structured selector for Grace in the Gap.",
-      "Return one valid JSON object only: no Markdown and no user-facing prose.",
-      "Choose one allowed candidate without changing any candidate field.",
-      "Use durationSeconds 5 or 8, confidence from 0 to 1, fallbackVotd false, and needsAuth false.",
+      "You are the private, structured ranking layer for Grace in the Gap.",
+      "Call select_grace_moment exactly once. Never return user-facing prose.",
+      "Choose a profile, snippet, passage, and tone only from one internally consistent allowed profile.",
+      "Prioritize an exact supplied lectionary reference, workflow stage, task fit, and non-repetition.",
+      "contextRank is the local editorial prior after calendar, preferences, and repetition scoring; normally choose rank 1.",
+      "Treat calendar and workflow as contextual signals; do not invent emotions or spiritual claims.",
+      "Use durationSeconds 5 or 8, conservative confidence, fallbackVotd false, and needsAuth false.",
+      "Return concise kebab-case reasonCodes that describe only supplied structured context.",
       `Allowed candidates: ${JSON.stringify(allowed)}`,
-      "Required camelCase keys: momentProfileId, reflectionSnippetId, passageHint, durationSeconds, tone, confidence, fallbackVotd, needsAuth."
+      "The function schema is authoritative."
     ].join("\n");
   }
-  extractText(body) {
+  buildSelectionTool(candidates) {
+    const profileIds = candidates.map((profile) => profile.id);
+    const snippetIds = [...new Set(candidates.flatMap((profile) => profile.snippet_ids))];
+    const passageHints = [...new Set(candidates.flatMap((profile) => profile.passage_hints))];
+    const tones = [...new Set(candidates.map((profile) => profile.tone))];
+    return {
+      type: "function",
+      function: {
+        name: "select_grace_moment",
+        description: "Select one editorially approved Grace moment by ID.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            momentProfileId: { type: "string", enum: profileIds },
+            reflectionSnippetId: { type: "string", enum: snippetIds },
+            passageHint: { type: "string", enum: passageHints },
+            durationSeconds: { type: "integer", enum: [5, 8] },
+            tone: { type: "string", enum: tones },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+            fallbackVotd: { type: "boolean", enum: [false] },
+            needsAuth: { type: "boolean", enum: [false] },
+            reasonCodes: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string", pattern: "^[a-z0-9-]+$" }
+            }
+          },
+          required: [
+            "momentProfileId",
+            "reflectionSnippetId",
+            "passageHint",
+            "durationSeconds",
+            "tone",
+            "confidence",
+            "fallbackVotd",
+            "needsAuth",
+            "reasonCodes"
+          ]
+        }
+      }
+    };
+  }
+  extractDecisionPayload(body) {
     const record2 = GenericObjectSchema.parse(body);
     const choices = record2.choices;
     if (Array.isArray(choices)) {
       const first = GenericObjectSchema.safeParse(choices[0]);
       const message = first.success ? GenericObjectSchema.safeParse(first.data.message) : void 0;
-      if (message?.success && typeof message.data.content === "string") return message.data.content.trim();
+      const toolCalls = message?.success ? message.data.tool_calls : void 0;
+      if (Array.isArray(toolCalls)) {
+        for (const toolCall of toolCalls) {
+          const parsedCall = GenericObjectSchema.safeParse(toolCall);
+          const functionCall = parsedCall.success ? GenericObjectSchema.safeParse(parsedCall.data.function) : void 0;
+          if (functionCall?.success && functionCall.data.name === "select_grace_moment" && typeof functionCall.data.arguments === "string") {
+            return functionCall.data.arguments.trim();
+          }
+        }
+      }
+      if (message?.success && typeof message.data.content === "string") {
+        return message.data.content.trim();
+      }
     }
     const output = record2.output;
     if (Array.isArray(output)) {
       for (const item of output) {
         const parsedItem = GenericObjectSchema.safeParse(item);
         if (!parsedItem.success || parsedItem.data.type !== "message") continue;
-        const content = parsedItem.data.content;
-        if (!Array.isArray(content)) continue;
-        for (const part of content) {
+        const content2 = parsedItem.data.content;
+        if (!Array.isArray(content2)) continue;
+        for (const part of content2) {
           const parsedPart = GenericObjectSchema.safeParse(part);
           if (parsedPart.success && typeof parsedPart.data.text === "string") {
             return parsedPart.data.text.trim();
@@ -15309,7 +16437,7 @@ var GlooSelector = class {
         }
       }
     }
-    throw new Error("Gloo response did not contain assistant JSON text");
+    throw new Error("Gloo response did not contain selection tool arguments");
   }
   extractCitations(body) {
     const record2 = GenericObjectSchema.safeParse(body);
@@ -15326,8 +16454,8 @@ var GlooSelector = class {
 
 // src/providers/offline.ts
 var OfflineScriptureProvider = class {
-  constructor(content) {
-    this.content = content;
+  constructor(content2) {
+    this.content = content2;
   }
   content;
   async getPassage(_versionId, usfm, locale) {
@@ -15359,8 +16487,15 @@ function firstString(record2, keys) {
 }
 function unwrapQuotes(value) {
   const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).trim();
+  const pairs = [
+    ['"', '"'],
+    ["\u201C", "\u201D"],
+    ["\xAB", "\xBB"]
+  ];
+  for (const [opening, closing] of pairs) {
+    if (trimmed.length >= 2 && trimmed.startsWith(opening) && trimmed.endsWith(closing)) {
+      return trimmed.slice(opening.length, -closing.length).trim();
+    }
   }
   return trimmed;
 }
@@ -15376,14 +16511,15 @@ var YouVersionProvider = class {
   timeoutMs;
   metadataCache = /* @__PURE__ */ new Map();
   async getPassage(versionId, usfm, locale) {
+    const resolvedVersionId = await this.resolveVersionId(versionId, locale);
     const passageUrl = new URL(
-      `/v1/bibles/${encodeURIComponent(versionId)}/passages/${encodeURIComponent(usfm)}`,
+      `/v1/bibles/${encodeURIComponent(resolvedVersionId)}/passages/${encodeURIComponent(usfm)}`,
       `${this.options.baseUrl}/`
     );
     passageUrl.searchParams.set("format", "text");
     const [passageBody, metadata] = await Promise.all([
       this.get(passageUrl, locale, "YouVersion passage"),
-      this.getBibleMetadata(versionId, locale)
+      this.getBibleMetadata(resolvedVersionId, locale)
     ]);
     const passageRecord = asRecord(passageBody);
     const data = asRecord(passageRecord?.data) ?? passageRecord;
@@ -15392,11 +16528,11 @@ var YouVersionProvider = class {
     const passage = PassageSchema.parse({
       usfm,
       reference: firstString(data, ["reference", "human_reference", "display_reference"]) ?? usfm,
-      text,
+      text: unwrapQuotes(text),
       versionId: metadata.versionId,
       versionName: metadata.versionName,
       copyright: metadata.copyright,
-      locale
+      locale: metadata.languageTag
     });
     return {
       passage,
@@ -15407,8 +16543,41 @@ var YouVersionProvider = class {
       }
     };
   }
+  async resolveVersionId(requestedVersionId, locale) {
+    const requestedLanguage = locale.toLowerCase().split("-")[0] ?? locale.toLowerCase();
+    if (requestedVersionId !== "auto") {
+      try {
+        const metadata = await this.getBibleMetadata(requestedVersionId, locale);
+        const versionLanguage = metadata.languageTag.toLowerCase().split("-")[0];
+        if (versionLanguage === requestedLanguage) return metadata.versionId;
+      } catch {
+      }
+    }
+    let pageToken;
+    for (let page = 0; page < 4; page += 1) {
+      const url2 = new URL("/v1/bibles", `${this.options.baseUrl}/`);
+      url2.searchParams.set("language_ranges", `${requestedLanguage}*`);
+      url2.searchParams.set("page_size", "25");
+      if (pageToken) url2.searchParams.set("page_token", pageToken);
+      const body = await this.get(url2, locale, "YouVersion bible collection");
+      const record2 = asRecord(body);
+      const data = Array.isArray(record2?.data) ? record2.data : [];
+      for (const item of data) {
+        const candidate = asRecord(item);
+        const id = firstString(candidate, ["id"]);
+        const languageTag = firstString(candidate, ["language_tag"]);
+        if (id && languageTag?.toLowerCase().split("-")[0] === requestedLanguage && firstString(candidate, ["copyright", "promotional_content"])) {
+          return id;
+        }
+      }
+      pageToken = firstString(record2, ["next_page_token"]);
+      if (!pageToken) break;
+    }
+    throw new Error(`YouVersion returned no licensed Bible for locale ${locale}`);
+  }
   async getBibleMetadata(versionId, locale) {
-    const cached2 = this.metadataCache.get(versionId);
+    const cacheKey = `${versionId}:${locale.toLowerCase()}`;
+    const cached2 = this.metadataCache.get(cacheKey);
     if (cached2) return cached2;
     const url2 = new URL(`/v1/bibles/${encodeURIComponent(versionId)}`, `${this.options.baseUrl}/`);
     const body = await this.get(url2, locale, "YouVersion bible metadata");
@@ -15420,13 +16589,14 @@ var YouVersionProvider = class {
     const metadata = {
       versionId: firstString(record2, ["id"]) ?? versionId,
       versionName: firstString(record2, ["abbreviation", "localized_abbreviation", "title", "localized_title"]) ?? `Bible ${versionId}`,
-      copyright: unwrapQuotes(copyright)
+      copyright: unwrapQuotes(copyright),
+      languageTag: firstString(record2, ["language_tag"]) ?? locale
     };
-    this.metadataCache.set(versionId, metadata);
+    this.metadataCache.set(cacheKey, metadata);
     return metadata;
   }
   async get(url2, locale, label) {
-    const response = await fetchWithTimeout(
+    return fetchJsonWithRetry(
       this.fetchImplementation,
       url2,
       {
@@ -15437,9 +16607,9 @@ var YouVersionProvider = class {
           Accept: "application/json"
         }
       },
-      this.timeoutMs
+      this.timeoutMs,
+      label
     );
-    return parseJsonResponse(response, label);
   }
 };
 
@@ -15447,6 +16617,7 @@ var YouVersionProvider = class {
 import { randomUUID } from "node:crypto";
 
 // src/selection/local-selector.ts
+var content = new ContentRepository();
 function stableNumber(seed) {
   let value = 2166136261;
   for (const character of seed) {
@@ -15455,35 +16626,81 @@ function stableNumber(seed) {
   }
   return value >>> 0;
 }
+function leastRecentlyUsed(candidates, recent) {
+  if (candidates.length === 0) return [];
+  const ranked = candidates.map((candidate) => ({
+    candidate,
+    // Histories are newest-first. A larger index means the item was seen less
+    // recently; -1 means it has never been seen and should win immediately.
+    age: recent.indexOf(candidate)
+  }));
+  const unseen = ranked.filter((item) => item.age === -1).map((item) => item.candidate);
+  if (unseen.length > 0) return unseen;
+  const oldestIndex = Math.max(...ranked.map((item) => item.age));
+  return ranked.filter((item) => item.age === oldestIndex).map((item) => item.candidate);
+}
 function selectLocally(event, candidates) {
   if (candidates.length === 0) throw new Error("No eligible moment profiles");
-  const weighted = candidates.flatMap((profile) => {
-    const slots = Math.max(1, Math.round(profile.weight * 4));
-    return Array.from({ length: slots }, () => profile);
-  });
-  const selected = weighted[stableNumber(`${event.sessionHash}:${event.taskType}:${event.timeWindow}`) % weighted.length];
+  const ranked = candidates.map((profile) => {
+    const seed = `${event.sessionHash}:${event.calendar.localDate}:${event.recentProfileIds.length}:${profile.id}`;
+    const jitter = stableNumber(seed) % 1e3 / 4e3;
+    return { profile, score: content.scoreProfile(event, profile) + jitter };
+  }).sort((left, right) => right.score - left.score || left.profile.id.localeCompare(right.profile.id));
+  const selected = ranked[0]?.profile;
   if (!selected) throw new Error("Unable to choose a moment profile");
+  const allPassageCandidates = content.passageCandidatesFor(selected, event);
+  const unmutedPassages = allPassageCandidates.filter((id) => !event.avoidedPassageIds.includes(id));
+  const passageCandidates = unmutedPassages.length > 0 ? unmutedPassages : allPassageCandidates;
+  const passagePool = leastRecentlyUsed(passageCandidates, event.recentPassageIds);
+  const exactLectionary = passagePool.find((usfm) => event.calendar.lectionaryRefs.includes(usfm));
+  const passageHint = exactLectionary ?? passagePool[stableNumber(`${event.sessionHash}:passage:${event.recentPassageIds.length}:${selected.id}`) % passagePool.length];
+  const snippetCandidates = content.snippetCandidatesFor(selected, event);
+  const snippetPool = leastRecentlyUsed(snippetCandidates, event.recentSnippetIds);
+  const reflectionSnippetId = snippetPool[stableNumber(`${event.sessionHash}:snippet:${event.recentSnippetIds.length}:${selected.id}`) % snippetPool.length];
+  if (!passageHint || !reflectionSnippetId) throw new Error("Profile has no selectable content");
+  const reasonCodes = selectionReasons(event, selected);
+  const margin = (ranked[0]?.score ?? 0) - (ranked[1]?.score ?? 0);
   return SelectorDecisionSchema.parse({
     momentProfileId: selected.id,
-    reflectionSnippetId: selected.snippet_id,
-    passageHint: selected.passage_hint,
+    reflectionSnippetId,
+    passageHint,
     durationSeconds: event.estimatedWaitSeconds >= 16 ? 8 : 5,
     tone: selected.tone,
-    confidence: 0.82,
+    confidence: Math.min(0.97, 0.72 + Math.max(0, margin) / 10),
     fallbackVotd: false,
-    needsAuth: false
+    needsAuth: false,
+    reasonCodes
   });
+}
+function selectionReasons(event, profile) {
+  const reasons = [];
+  if (profile.task_types.includes(event.taskType)) reasons.push(`task-${event.taskType}`);
+  if (event.taskTypes.length > 1) reasons.push("multi-task-context");
+  if (profile.workflow_stages?.includes(event.workflowStage)) {
+    reasons.push(`workflow-${event.workflowStage}`);
+  }
+  const observance = profile.observance_ids?.find((id) => event.calendar.observanceIds.includes(id));
+  if (observance) reasons.push(`calendar-${observance}`);
+  if (profile.liturgical_seasons?.includes(event.calendar.season)) {
+    reasons.push(`season-${event.calendar.season}`);
+  }
+  if (profile.time_windows?.includes(event.timeWindow)) reasons.push(`time-${event.timeWindow}`);
+  if (event.preferredProfileIds.includes(profile.id)) reasons.push("feedback-preferred");
+  if (event.recentProfileIds.length > 0) reasons.push("repetition-aware");
+  if (reasons.length === 0) reasons.push("editorial-default");
+  return reasons.slice(0, 8);
 }
 
 // src/service/moment-service.ts
 var MomentService = class {
-  constructor(content, selector, scripture, offlineScripture, bibleVersionId, telemetryEnabled) {
-    this.content = content;
+  constructor(content2, selector, scripture, offlineScripture, bibleVersionId, telemetryEnabled, showSelectionReason) {
+    this.content = content2;
     this.selector = selector;
     this.scripture = scripture;
     this.offlineScripture = offlineScripture;
     this.bibleVersionId = bibleVersionId;
     this.telemetryEnabled = telemetryEnabled;
+    this.showSelectionReason = showSelectionReason;
   }
   content;
   selector;
@@ -15491,12 +16708,26 @@ var MomentService = class {
   offlineScripture;
   bibleVersionId;
   telemetryEnabled;
+  showSelectionReason;
   async create(event) {
-    const candidates = this.content.candidatesFor(event);
+    const candidates = this.content.candidatesFor(event).map((profile) => ({
+      ...profile,
+      passage_hints: this.content.passageCandidatesFor(profile, event),
+      snippet_ids: this.content.snippetCandidatesFor(profile, event)
+    }));
     const selectorResult = await this.selectSafely(event, candidates);
     const validated = this.validateGroundedDecision(selectorResult.decision, candidates);
-    const decision = validated ?? selectLocally(event, candidates);
-    const selectorDegraded = selectorResult.degraded || !validated;
+    const preliminaryDecision = validated ?? selectLocally(event, candidates);
+    const selectorLive = selectorResult.live && Boolean(validated);
+    const selectorDegraded = selectorResult.degraded || !validated || !selectorLive;
+    const selectedProfile = candidates.find((candidate) => {
+      return candidate.id === preliminaryDecision.momentProfileId;
+    });
+    if (!selectedProfile) throw new Error("Selected profile was not in the eligible candidate set");
+    const decision = validated ? {
+      ...preliminaryDecision,
+      reasonCodes: selectionReasons(event, selectedProfile)
+    } : preliminaryDecision;
     let scriptureResult;
     let scriptureDegraded = false;
     try {
@@ -15507,24 +16738,44 @@ var MomentService = class {
       );
     } catch {
       scriptureDegraded = true;
-      scriptureResult = await this.offlineScripture.getPassage(
-        this.bibleVersionId,
-        decision.passageHint,
-        event.locale
-      );
+      try {
+        scriptureResult = await this.offlineScripture.getPassage(
+          this.bibleVersionId,
+          decision.passageHint,
+          event.locale
+        );
+      } catch {
+        scriptureResult = await this.offlineScripture.getPassage(
+          this.bibleVersionId,
+          selectedProfile.fallback_passage_hint,
+          event.locale
+        );
+      }
     }
     const snippet = this.content.getSnippet(decision.reflectionSnippetId, event.locale);
+    const scriptureLive = scriptureResult.metadata.live;
     return MomentExperienceSchema.parse({
       traceId: randomUUID(),
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       durationSeconds: decision.durationSeconds,
       tone: decision.tone,
       reflection: snippet.text,
+      reflectionLocale: snippet.locale,
       passage: scriptureResult.passage,
+      selection: {
+        profileId: selectedProfile.id,
+        snippetId: snippet.id,
+        passageId: scriptureResult.passage.usfm,
+        themes: selectedProfile.themes,
+        reasonCodes: decision.reasonCodes,
+        explanationVisible: this.showSelectionReason
+      },
       provenance: {
         selector: selectorResult.provider,
         scripture: scriptureResult.metadata.provider,
-        live: scriptureResult.metadata.live,
+        selectorLive,
+        scriptureLive,
+        live: selectorLive && scriptureLive,
         degraded: selectorDegraded || scriptureDegraded,
         contentRelease: this.content.release,
         citations: [...selectorResult.citations, ...scriptureResult.metadata.citations]
@@ -15543,6 +16794,7 @@ var MomentService = class {
         decision: result.decision,
         provider: result.metadata.provider,
         citations: result.metadata.citations,
+        live: result.metadata.live,
         degraded: false
       };
     } catch {
@@ -15550,6 +16802,7 @@ var MomentService = class {
         decision: selectLocally(event, candidates),
         provider: "local-rule-fallback",
         citations: [],
+        live: false,
         degraded: true
       };
     }
@@ -15558,7 +16811,7 @@ var MomentService = class {
     if (decision.confidence < 0.55 || decision.needsAuth || decision.fallbackVotd) return void 0;
     const profile = candidates.find((candidate) => candidate.id === decision.momentProfileId);
     if (!profile) return void 0;
-    if (profile.snippet_id !== decision.reflectionSnippetId || profile.passage_hint !== decision.passageHint || profile.tone !== decision.tone) {
+    if (!profile.snippet_ids.includes(decision.reflectionSnippetId) || !profile.passage_hints.includes(decision.passageHint) || profile.tone !== decision.tone) {
       return void 0;
     }
     return decision;
@@ -15567,23 +16820,53 @@ var MomentService = class {
 
 // src/service/factory.ts
 function createService(config2 = loadConfig()) {
-  const content = new ContentRepository();
+  const content2 = new ContentRepository();
   const selector = new GlooSelector(config2.gloo);
   const scripture = new YouVersionProvider(config2.youVersion);
-  const offlineScripture = new OfflineScriptureProvider(content);
+  const offlineScripture = new OfflineScriptureProvider(content2);
   return {
     config: config2,
-    content,
+    content: content2,
     service: new MomentService(
-      content,
+      content2,
       selector,
       scripture,
       offlineScripture,
       config2.preferences.bibleVersionId,
-      config2.preferences.telemetryEnabled
+      config2.preferences.telemetryEnabled,
+      config2.preferences.showSelectionReason
     )
   };
 }
+
+// src/telemetry.ts
+import { appendFile, mkdir as mkdir2 } from "node:fs/promises";
+import { dirname as dirname2 } from "node:path";
+var TelemetryEventSchema = external_exports.object({
+  event: external_exports.enum(["card_rendered", "card_skipped", "provider_fallback", "feedback"]),
+  at: external_exports.string().datetime(),
+  traceId: external_exports.string().uuid().optional(),
+  taskType: external_exports.string().max(40).optional(),
+  reason: external_exports.string().max(80).optional(),
+  live: external_exports.boolean().optional(),
+  degraded: external_exports.boolean().optional(),
+  rating: external_exports.number().int().min(1).max(5).optional()
+}).strict();
+var TelemetryWriter = class {
+  constructor(enabled, path) {
+    this.enabled = enabled;
+    this.path = path;
+  }
+  enabled;
+  path;
+  async write(event) {
+    if (!this.enabled) return;
+    const safe = TelemetryEventSchema.parse(event);
+    await mkdir2(dirname2(this.path), { recursive: true });
+    await appendFile(this.path, `${JSON.stringify(safe)}
+`, { encoding: "utf8", mode: 384 });
+  }
+};
 
 // src/hooks/on-prompt.ts
 async function readStandardInput() {
@@ -15594,28 +16877,87 @@ async function readStandardInput() {
 function emit(value) {
   process.stdout.write(JSON.stringify(value));
 }
+async function writeTelemetrySafely(writer, event) {
+  try {
+    await writer.write(event);
+  } catch {
+  }
+}
 async function main() {
   try {
     const input = JSON.parse(await readStandardInput());
+    const hook = ClaudeHookInputSchema.parse(input);
     const baseConfig = loadConfig();
     const store = new GraceDataStore(baseConfig.dataDirectory);
     const preferences = await store.loadPreferences(baseConfig.preferences);
     const config2 = { ...baseConfig, preferences };
     const now = /* @__PURE__ */ new Date();
+    const salt = await store.installationSalt();
+    const sessionHash = hashSessionId(hook.session_id, salt);
+    const [sessionState, feedback] = await Promise.all([
+      store.loadSessionState(sessionHash, now),
+      store.loadFeedbackContext()
+    ]);
+    const telemetry = new TelemetryWriter(preferences.telemetryEnabled, store.telemetryPath);
     const event = normalizeClaudeHook(input, {
       locale: preferences.locale,
+      timeZone: preferences.timeZone,
+      tradition: preferences.tradition,
+      preferredTone: preferences.preferredTone,
       contextMode: preferences.contextMode,
+      sessionState,
+      feedback,
+      sessionSalt: salt,
       now
     });
-    const state = await store.loadPolicyState(now);
+    const state = await store.loadPolicyState(now, preferences.timeZone);
     const policy = evaluatePolicy(event, preferences, state, now);
     if (!policy.show) {
+      await Promise.all([
+        ...event.estimatedWaitSeconds > 0 ? [store.recordSessionTurn({
+          previous: sessionState,
+          taskType: event.taskType,
+          now
+        })] : [],
+        writeTelemetrySafely(telemetry, {
+          event: "card_skipped",
+          at: now.toISOString(),
+          taskType: event.taskType,
+          reason: policy.reason
+        })
+      ]);
       emit({ suppressOutput: true });
       return;
     }
     const { service } = createService(config2);
     const moment = await service.create(event);
-    await store.savePolicyState(recordShown(state, now));
+    await Promise.all([
+      store.savePolicyState(recordShown(state, now)),
+      store.recordSessionMoment({
+        previous: sessionState,
+        taskType: event.taskType,
+        moment,
+        historyLimit: preferences.historyLimit,
+        now
+      }),
+      store.recordPresentedMoment(moment),
+      writeTelemetrySafely(telemetry, {
+        event: "card_rendered",
+        at: now.toISOString(),
+        traceId: moment.traceId,
+        taskType: event.taskType,
+        live: moment.provenance.live,
+        degraded: moment.provenance.degraded
+      }),
+      ...moment.provenance.degraded ? [writeTelemetrySafely(telemetry, {
+        event: "provider_fallback",
+        at: now.toISOString(),
+        traceId: moment.traceId,
+        taskType: event.taskType,
+        live: moment.provenance.live,
+        degraded: true
+      })] : []
+    ]);
     emit({ systemMessage: renderHookCard(moment), suppressOutput: true });
   } catch {
     emit({ suppressOutput: true });

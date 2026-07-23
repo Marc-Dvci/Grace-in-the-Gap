@@ -4,61 +4,80 @@
 
 ```mermaid
 flowchart LR
-    S[Explicit spinner sync] --> F[Gloo structured ID selector]
-    F --> H[Catalog validation]
-    H --> I[YouVersion passage + attribution]
-    I --> T[Official spinner tip during waits]
     A[Claude prompt submitted] --> B[Async official hook]
-    A --> C[Claude starts work immediately]
-    B --> D[Local normalize + interruption policy]
-    D -->|ineligible| E[No full card]
-    D -->|eligible| F2[Gloo structured ID selector]
-    F2 -->|invalid, slow, unavailable| G[Deterministic on-device selector]
-    F2 --> H2[Catalog validation]
-    G --> H2
-    H2 --> I2[YouVersion passage fetch]
-    I2 -->|unavailable or unattributed| J[Bundled public-domain fallback verse]
-    I2 --> K[Queued systemMessage next turn]
-    J --> K
+    A --> C[Claude starts work]
+    B --> D[Local normalization]
+    D --> E[Timezone calendar]
+    D --> F[Session + feedback IDs]
+    E --> G[Interruption policy]
+    F --> G
+    G -->|ineligible| H[No card]
+    G -->|eligible| I[Eligible catalog rank]
+    I --> J[Gloo V2 required tool]
+    J -->|invalid or unavailable| K[Local selector]
+    J --> L[Relational validation]
+    K --> L
+    L --> M[YouVersion passage + Bible metadata]
+    M -->|unavailable or unattributed| N[Bundled public-domain fallback]
+    M --> O[Queued card next turn]
+    N --> O
 ```
 
-Grace requires live Gloo and YouVersion credentials. The spinner tip is the
-opt-in wait-state surface: static mode uses project-owned micro-copy plus a
-Scripture reference; `spinner sync` runs one live Gloo selection and YouVersion
-resolution and installs a single provider-selected, attributed tip. The
-asynchronous prompt hook queues the richer, context-labelled full card for the
-next conversation turn — it never claims mid-turn delivery and never delays Claude.
+Claude Code's official spinner override is a separate surface. `spinner install` uses static owned copy plus references; `spinner sync` first obtains one live provider-selected and attributed moment, then safely installs it. The context-selected asynchronous card is not represented as a dynamic mid-turn spinner.
 
-## Trust boundaries
+## Context model
+
+The local normalizer emits only bounded, enumerated data:
+
+- primary and secondary task labels;
+- estimated wait bucket;
+- workflow stage, previous outcome, repeated-task bucket, and effort bucket;
+- locale, IANA-timezone window, tradition, and preferred tone;
+- local calendar date, season, matching observance IDs, rank, and curated passage anchors;
+- recent approved profile/snippet/passage IDs;
+- high/low-rated approved IDs.
+
+In `private` mode, task/workflow/outcome become `unknown`. In `local-labels`, prompt matching happens in process memory and the text is immediately discarded.
+
+Session hashes use HMAC-SHA256 with a random, installation-local salt. The raw Claude session ID is not stored or transmitted.
+
+## Calendar boundary
+
+`src/calendar/liturgical.ts` computes the local civil date with `Intl.DateTimeFormat` and an IANA timezone. It includes Gregorian Easter computus, movable observances, fixed feasts, and seasonal ranges.
+
+Tradition-specific commemorations are returned only for a matching explicit preference. The passage references are curated context anchors for a short demo moment; they are not represented as a complete official lectionary. Exact same-day anchors outrank seasonal and task-only choices.
+
+## Provider and trust boundaries
 
 | Boundary | Allowed | Explicitly forbidden |
 |---|---|---|
-| Claude hook to normalizer | Prompt in process memory | Disk persistence or logging |
-| Normalizer to Gloo | Surface, task label, duration bucket, locale, time window | Raw prompt, code, filenames, transcript path, working directory |
-| Resolver to YouVersion | Version ID, USFM reference, locale | Prompt, code, identity |
-| Telemetry | Event name, trace ID, coarse task label, reason, booleans, rating | Prompt, code, Scripture text, email, file paths |
-| Gloo output to UI | IDs after schema and catalog validation | Generated prose or ungrounded passage choices |
+| Hook to normalizer | Prompt in volatile process memory | Disk persistence or logging |
+| Normalizer to Gloo | Enumerated context, calendar data, recent/feedback approved IDs | Raw prompt, code, filenames, path, transcript, session hash |
+| Resolver to YouVersion | Version ID, USFM reference, locale | Prompt, code, identity, feedback |
+| Local history | Salted session hash, approved IDs, timestamps | Prompt, verse/reflection text, source code |
+| Local feedback | Trace/approved IDs, timestamp, 1–5 rating | Free text, prompt, verse/reflection text |
+| Telemetry | Event, trace ID, coarse task, reason, booleans, rating | Prompt, code, Scripture text, email, path |
+| Gloo output to UI | Validated IDs | Generated prose or ungrounded combinations |
 
-The HTTP API applies a strict schema and rejects unknown fields, including
-`prompt`. Provider credentials never enter MCP tool arguments, user-visible
-responses, telemetry, or logs.
+The HTTP API uses a strict schema and rejects unknown fields, including `prompt`. Credentials never enter MCP arguments, cards, telemetry, test fixtures, notebook source/output, or documentation.
 
 ## Providers
 
-| Component | Source | Notes |
+| Component | Source | Behavior |
 |---|---|---|
-| Selector | Gloo `/ai/v1/responses` (or grounded completions) | Strict JSON ID selection, OAuth2 client-credentials with token cache |
-| Scripture | YouVersion `GET /v1/bibles/{id}/passages/{usfm}` + `GET /v1/bibles/{id}` | Text/reference from the passage endpoint; version name + required copyright from the Bible resource, fetched in parallel and cached |
-| Selector fallback | On-device deterministic rule | Used only when Gloo is invalid/slow/unavailable; picks from the same approved catalog |
-| Scripture fallback | Bundled public-domain (WEB) verses | Used only when YouVersion is unreachable; labelled `OFFLINE FALLBACK · PUBLIC DOMAIN` |
+| Selector | Gloo `POST /ai/v2/chat/completions` | Direct tool-capable model, `tool_choice: "required"`, OAuth2 token cache |
+| Optional selector | Gloo grounded completions | Requires an explicit project-owned RAG publisher |
+| Scripture | YouVersion passage + Bible resources | Passage text/reference plus mandatory version/copyright metadata |
+| Selector fallback | Deterministic on-device ranker | Same eligibility, calendar, feedback, and catalog constraints |
+| Scripture fallback | Small bundled World English Bible set | Public domain and visibly labelled |
 
-Provenance carries `live` (Scripture came from YouVersion) and `degraded` (a
-fallback path was used), so a fallback card can never be mistaken for a live one —
-the card label and status output are driven by those flags.
+Gloo's 30-second timeout is intentionally larger than a chat-sized timeout because tool-capable cold routes can take longer. The Claude hook is asynchronous, so this does not delay Claude's work. Provider HTTP calls have one bounded retry for network errors, HTTP 429, and HTTP 5xx.
 
-## Structured selection
+YouVersion Bible metadata is cached per version and locale. If the configured Bible language does not match the requested locale, Grace queries the licensed collection with `language_ranges=<language>*` and selects an attributed matching version. A passage is never displayed without a non-empty copyright/promotional attribution.
 
-Gloo receives the eligible catalog candidates and must return only:
+## Structured selection and validation
+
+Gloo must call `select_grace_moment` with:
 
 ```json
 {
@@ -69,28 +88,45 @@ Gloo receives the eligible catalog candidates and must return only:
   "tone": "reflective",
   "confidence": 0.82,
   "fallbackVotd": false,
-  "needsAuth": false
+  "needsAuth": false,
+  "reasonCodes": ["task-debugging"]
 }
 ```
 
-The service rejects the result unless the profile, snippet, passage, and tone
-exactly match a catalog candidate and confidence is at least `0.55`. No
-model-generated sentence reaches the user.
+The function schema restricts every ID to the current eligible candidates. The service then performs a relational validation that the selected profile contains that exact snippet and passage and has that tone. It also rejects confidence below `0.55`, `needsAuth`, or verse-of-the-day fallback requests.
 
-## Failure behavior
+Provider reason codes are retained only for contract observability. User-visible explanations are independently re-derived from the event and the validated profile, preventing a model from claiming that a time, feast, workflow, or preference matched when it did not.
 
-- Gloo auth/model timeout or malformed JSON: select deterministically from the same eligible catalog (still live Scripture).
-- Hallucinated or cross-wired IDs: reject and select on-device.
-- YouVersion error, missing content, or missing copyright: render a bundled public-domain fallback verse, marked not-live.
-- Missing credentials: the CLI/API/MCP report a clear, actionable message; the async hook simply shows nothing.
+## Repetition and feedback
+
+Histories are newest-first and bounded by the configured limit. The ranker:
+
+1. penalizes recently shown profiles;
+2. removes recent passages/snippets while unseen choices exist;
+3. after saturation, chooses the least recently used candidate rather than collapsing to a stable repeat;
+4. preserves exact feast anchors when they are fresh;
+5. modestly boosts highly rated profiles and strongly de-prioritizes low-rated profiles/passages.
+
+Feedback cannot introduce new content. All final choices remain inside the reviewed catalog.
+
+## Provenance and failure behavior
+
+Provenance has independent `selectorLive` and `scriptureLive` flags. Overall `live` is true only when both are true.
+
+- Gloo auth/timeout/malformed output: local selector, then live YouVersion if available.
+- Hallucinated, cross-wired, or low-confidence IDs: reject and select locally.
+- YouVersion timeout, missing text, language failure, or missing attribution: use the selected profile's bundled fallback.
+- Missing credentials: interactive commands report an actionable error; the async hook returns nothing.
 - Hook crash or invalid input: return only `{"suppressOutput":true}` and never block Claude.
-- Short task, cooldown, cap, or disabled preference: do nothing.
+- Short wait, cooldown, cap, disabled state, or slash command: no automatic card.
+- Telemetry failure: never suppress or block a moment.
 
-## Runtime packaging
+The visible provider label is computed from the two live flags, not a generic success boolean.
 
-`esbuild` produces standalone Node 20 ESM entry points for the CLI, local API,
-async hook, and MCP server. Each bundles its production dependencies and the
-catalog. This is necessary because Claude Code copies marketplace plugins into a
-cache and does not run `npm install` for arbitrary local source directories. The
-contract-faithful HTTP doubles used by the test suite live under `tests/` and are
-never bundled into the product.
+## Packaging and verification
+
+`esbuild` produces standalone Node 20 ESM entry points for the CLI, API, asynchronous hook, and MCP server. This is required because marketplace installs do not run arbitrary dependency installation.
+
+The quality pipeline includes strict TypeScript, unit tests, contextual relevance tests, local HTTP contract doubles, API/hook/MCP integration tests, a 108-scenario evaluation, a 24-turn repeat simulation, clean bundle generation, and built-artifact smoke tests. Contract doubles live only under `tests/` and are never bundled.
+
+`scripts/live-canary.ts` bypasses fallback swallowing and tests each provider directly. Its output contains only provider names, approved IDs, attribution presence, and privacy booleans. `scripts/build_notebook.py` regenerates and executes the Kaggle notebook from the current catalog/evaluation and uses private environment variables only for its live cell.
